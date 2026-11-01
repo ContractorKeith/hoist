@@ -13,7 +13,8 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 M0 done — 2026-11-01 (#9): toolchain, schema, adapter seams, e2e harness, CI. M1 done —
 2026-11-01 (#14): HOIST_DIR layout, apps verbs, SSH forced-command dispatch, pre-receive hook
 building `hoist/<app>:<slug>-v<n>-<sha12>` into a `built` release, migration 2, user-mode sshd
-e2e. M2 (cutover, Caddy routes, TLS, boot reconcile) in progress.
+e2e. M2 (cutover, Caddy routes, TLS, boot reconcile) in progress —
+[draft PR #19](https://github.com/ContractorKeith/hoist/pull/19).
 
 ## Commands
 
