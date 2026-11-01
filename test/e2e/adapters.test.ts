@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { Docker } from "../../src/adapters/docker";
 import { eventually, withHarness } from "./harness";
 
@@ -43,16 +45,32 @@ scenario(
         expect(() => new Docker("tcp://127.0.0.1:2375")).toThrow(
           "only unix sockets",
         );
-        const logs = await docker.buildImage(
-          {
-            contextDir: resolve(import.meta.dir, "../fixtures/hello"),
-            tag,
-            labels,
-          },
-          AbortSignal.timeout(120_000),
+        const context = await mkdtemp(join(tmpdir(), "hoist-tcp-"));
+        await cp(resolve(import.meta.dir, "../fixtures/hello"), context, {
+          recursive: true,
+        });
+        await writeFile(
+          join(context, "Dockerfile"),
+          (await readFile(join(context, "Dockerfile"), "utf8")).replace(
+            "EXPOSE 8080",
+            "EXPOSE 8080 9999/udp",
+          ),
         );
-        const buildLog = await new Response(logs).text();
-        expect(buildLog.length).toBeGreaterThan(0);
+        try {
+          const logs = await docker.buildImage(
+            {
+              contextDir: context,
+              tag,
+              labels,
+            },
+            AbortSignal.timeout(120_000),
+          );
+          const buildLog = await new Response(logs).text();
+          expect(buildLog.length).toBeGreaterThan(0);
+        } finally {
+          await rm(context, { recursive: true, force: true });
+        }
+        expect(await docker.imagePorts(tag)).toEqual([8080]);
         expect(await docker.listImages(labels)).toHaveLength(1);
         const id = await docker.createContainer({
           image: tag,
@@ -61,6 +79,9 @@ scenario(
           publishPort: appPort,
         });
         await docker.startContainer(id);
+        await expect(docker.inspectContainer(id, 9999)).rejects.toThrow(
+          "Invalid port",
+        );
         expect(
           (await docker.listContainers(labels)).map(
             (container) => container.id,
@@ -96,6 +117,24 @@ scenario(
         expect(containerLog).toContain("httpd");
         await docker.stopContainer(id);
         await docker.removeContainer(id);
+        // Only TCP exposures count, and inspection must select the requested binding.
+        const mixed = await docker.createContainer({
+          image: tag,
+          labels,
+          port: 8080,
+          publishPort: "",
+        });
+        await docker.startContainer(mixed);
+        expect(await docker.inspectContainer(mixed, 8080)).toMatchObject({
+          running: true,
+          appPort: 8080,
+        });
+        await docker.stopContainer(mixed);
+        expect(await docker.inspectContainer(mixed, 8080)).toMatchObject({
+          running: false,
+          appPort: 8080,
+        });
+        await docker.removeContainer(mixed);
         await docker.removeImage(tag);
       },
     );

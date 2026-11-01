@@ -13,7 +13,8 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 M0 done — 2026-11-01 (#9): toolchain, schema, adapter seams, e2e harness, CI. M1 done —
 2026-11-01 (#14): HOIST_DIR layout, apps verbs, SSH forced-command dispatch, pre-receive hook
 building `hoist/<app>:<slug>-v<n>-<sha12>` into a `built` release, migration 2, user-mode sshd
-e2e. M2 (cutover, Caddy routes, TLS, boot reconcile) in progress.
+e2e. M2 (cutover, Caddy routes, TLS, boot reconcile) in progress —
+[draft PR #19](https://github.com/ContractorKeith/hoist/pull/19).
 
 ## Commands
 
@@ -47,6 +48,16 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
   tested on fakes. Adapters are thin and covered by e2e only.
 - Everything from a pushed repo is untrusted: slugify branch names, validate health paths,
   clamp sizes before Docker, Caddy or the filesystem see them.
+- Run `hoist serve` before pushing; it supervises Caddy and reconciles interrupted builds, live containers and orphan containers on boot.
+- `HOIST_TLS=acme` (default) uses Let's Encrypt with `HOIST_ACME_EMAIL`; `internal` uses the local CA. `HOIST_HTTP_PORT`/`HOIST_HTTPS_PORT` default to 80/443; `HOIST_CADDY_ADMIN_PORT` defaults to 2019 and must match in serve and hooks. Caddy data lives in `HOIST_DIR/caddy`.
+- Containers use the single exposed TCP port (ignore UDP); no TCP exposure uses `PORT` or 8080; several TCP ports require `PORT`. Docker assigns the loopback-only published port.
+- SQLite `locks` leases serialize hook reserve/build/cutover and reconcile; heartbeat every 10 s, reclaim dead PIDs or heartbeats older than 60 s, poll 200 ms for 10 minutes, and abort waits on shutdown. No lock files.
+- Health requires 2xx; redirects are not followed and 3xx fails cutover.
+- Reconcile updates routes per app under its lease, never loads a full snapshot, verifies container app/release labels, and removes non-live candidates as interrupted cutovers. Spawn config dedupes newest release id per host.
+- `apps:destroy` removes local resources and rows before routes; unreachable Caddy warns and succeeds because serve rebuilds routes.
+- The SQLite `serve` lease enforces one supervisor per HOIST_DIR and records child_pid; after a crash, reap only the recorded pinned Caddy child for this directory before restarting.
+- A Caddy restart during a push may fail its route write; the hook fails that release and removes its candidate.
+- Five consecutive Caddy exits under 10 s fail serve with exit code and a 50-line stderr tail; shutdown/not-ready cleanup escalates SIGTERM to SIGKILL after 5 s.
 - One process. Caddy is a supervised child; the preview sweeper is a timer. No queue.
 - A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
   change during cutover. Delete is governed by retention (M3).

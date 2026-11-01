@@ -1,5 +1,6 @@
-import type { DockerClient } from "../adapters/interfaces";
+import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
 import type { App, Store } from "../store/interface";
+import { removeImages } from "./build";
 import { appName, healthPath } from "./validation";
 
 export function knownApp(store: Store, name: string): App {
@@ -40,15 +41,32 @@ export async function destroyApp(
   docker: DockerClient,
   app: App,
   cleanup: () => Promise<void>,
+  caddy: CaddyAdmin,
+  warn: (message: string) => void = console.error,
 ): Promise<void> {
   if (store.releases(app.id).some((release) => release.status === "building"))
     throw new Error(
       `a build is in progress for ${app.name}; wait for it to finish and retry`,
     );
-  // TODO M2: remove containers and Caddy routes before deleting the app.
-  // TODO M2 reconcile: fail stale building releases at startup.
-  for (const image of await docker.listImages({ "hoist.app": app.name }))
-    await docker.removeImage(image);
+  for (const container of await docker.listContainers({
+    "hoist.app": app.name,
+  })) {
+    await docker.stopContainer(container.id);
+    await docker.removeContainer(container.id);
+  }
+  await removeImages(docker, { "hoist.app": app.name });
   await cleanup();
   store.deleteApp(app.id);
+  try {
+    await caddy.removeRoute(app.domain);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes("Caddy admin API not reachable")
+    )
+      throw error;
+    warn(
+      "Caddy not reachable; routes are rebuilt from the store when hoist serve starts",
+    );
+  }
 }

@@ -1,7 +1,9 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { version } from "../../package.json";
+import { Caddy } from "../adapters/caddy";
 import { Docker } from "../adapters/docker";
+import { checkHealth } from "../adapters/health";
 import { hostName } from "../adapters/validation";
 import { createApp, destroyApp, knownApp } from "../core/apps";
 import { wasBuildErrorLogged } from "../core/build";
@@ -10,6 +12,7 @@ import { dataRoot } from "../data";
 import { parseDispatch } from "../git/dispatch";
 import { receive } from "../git/hook";
 import { createRepo } from "../git/repository";
+import { caddySettings, serve } from "../server";
 import { SqliteStore } from "../store/sqlite";
 
 const usage =
@@ -69,6 +72,10 @@ export function parseCli(args: string[]): {
 export async function run(args: string[]): Promise<number> {
   let store: SqliteStore | undefined;
   try {
+    if (args[0] === "serve" && args.length === 1) {
+      await serve();
+      return 0;
+    }
     if (args[0] === "ssh-dispatch" && args.length === 1) {
       const command = parseDispatch(process.env.SSH_ORIGINAL_COMMAND ?? "");
       if (command.kind === "cli") {
@@ -101,7 +108,9 @@ export async function run(args: string[]): Promise<number> {
       const controller = new AbortController();
       const abort = () => controller.abort(new Error("Build aborted"));
       process.on("SIGTERM", abort);
-      process.on("SIGHUP", abort);
+      const disconnected = () => {};
+      process.on("SIGHUP", disconnected);
+      process.on("SIGPIPE", disconnected);
       try {
         const chunks: Uint8Array[] = [];
         let length = 0;
@@ -117,10 +126,15 @@ export async function run(args: string[]): Promise<number> {
           app,
           new TextDecoder().decode(Buffer.concat(chunks)),
           controller.signal,
+          {
+            caddy: new Caddy(caddySettings(root).adminPort),
+            health: checkHealth,
+          },
         );
       } finally {
         process.off("SIGTERM", abort);
-        process.off("SIGHUP", abort);
+        process.off("SIGHUP", disconnected);
+        process.off("SIGPIPE", disconnected);
       }
       return 0;
     }
@@ -179,13 +193,22 @@ export async function run(args: string[]): Promise<number> {
       if (prompt(`Destroy ${name}? Type ${name} to confirm:`) !== name)
         throw new Error("Destroy cancelled");
     }
-    await destroyApp(store, new Docker(), app, async () => {
-      await rm(join(root, "repos", `${name}.git`), {
-        recursive: true,
-        force: true,
-      });
-      await rm(join(root, "releases", name), { recursive: true, force: true });
-    });
+    await destroyApp(
+      store,
+      new Docker(),
+      app,
+      async () => {
+        await rm(join(root, "repos", `${name}.git`), {
+          recursive: true,
+          force: true,
+        });
+        await rm(join(root, "releases", name), {
+          recursive: true,
+          force: true,
+        });
+      },
+      new Caddy(caddySettings(root).adminPort),
+    );
     console.log(`Destroyed ${name}`);
     return 0;
   } catch (error) {

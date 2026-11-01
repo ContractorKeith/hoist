@@ -1,11 +1,13 @@
 import { open } from "node:fs/promises";
 import { join } from "node:path";
-import type { DockerClient } from "../adapters/interfaces";
+import { SqliteAppLocks } from "../adapters/app-lock";
+import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
 import {
   buildRelease,
   removeReleaseImages,
   reserveRelease,
 } from "../core/build";
+import { cutover, type HealthCheck } from "../core/cutover";
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 import type { App, Release, Store } from "../store/interface";
@@ -43,12 +45,25 @@ export function parseRefs(
 }
 
 export async function receive(
+  ...args: Parameters<typeof receiveLocked>
+): Promise<void> {
+  if (!parseRefs(args[4]).length) return receiveLocked(...args);
+  const [, store, , app, , signal] = args;
+  await new SqliteAppLocks(store).withLock(
+    app.name,
+    () => receiveLocked(...args),
+    signal,
+  );
+}
+
+async function receiveLocked(
   root: string,
   store: Store,
   docker: DockerClient,
   app: App,
   input: string,
   signal: AbortSignal,
+  edge: { caddy: CaddyAdmin; health: HealthCheck },
   prepare: typeof checkout = checkout,
   refsClient: typeof gitRefs = gitRefs,
 ): Promise<void> {
@@ -95,7 +110,7 @@ export async function receive(
           },
           async (chunk) => {
             await logFile.writeFile(chunk);
-            await Bun.write(Bun.stderr, chunk);
+            await Bun.write(Bun.stderr, chunk).catch(() => {});
           },
           signal,
           async () => {
@@ -114,8 +129,54 @@ export async function receive(
         }
       }
     }
+    // Finish every build before any cutover, so a bad second ref cannot leave the first live.
+    for (const release of reserved) {
+      // TODO M5: non-main branches gain preview hosts and their own cutover.
+      if (release.branch !== "main") continue;
+      const built = store.releases(app.id).find((row) => row.id === release.id);
+      const ref = refs.find((row) => row.branch === release.branch);
+      if (!built || !ref) throw new Error("Release disappeared before cutover");
+      const path = privatePath(
+        join(
+          root,
+          "releases",
+          app.name,
+          branchSlug(release.branch),
+          `v${release.number}`,
+          "build.log",
+        ),
+        false,
+        false,
+        root,
+      );
+      const logFile = await open(path, "a", 0o600);
+      try {
+        await cutover(
+          store,
+          docker,
+          edge.caddy,
+          app,
+          built,
+          /^0+$/.test(ref.oldSha) ? null : ref.oldSha,
+          () => refsClient.head(repo, release.branch),
+          edge.health,
+          async (message) => {
+            const chunk = new TextEncoder().encode(`${message}\n`);
+            await logFile.writeFile(chunk);
+            await Bun.write(Bun.stderr, chunk).catch(() => {});
+          },
+        );
+      } finally {
+        await logFile.close();
+      }
+    }
   } catch (error) {
     for (const release of reserved) {
+      if (
+        store.releases(app.id).find((row) => row.id === release.id)?.status ===
+        "live"
+      )
+        continue;
       try {
         store.failRelease(release.id);
       } catch {

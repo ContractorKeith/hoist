@@ -59,6 +59,13 @@ export const migrations = [
   ALTER TABLE releases_next RENAME TO releases;
   CREATE TRIGGER immutable_release_snapshot BEFORE UPDATE OF image, config_json ON releases
     BEGIN SELECT RAISE(ABORT, 'release snapshots are immutable'); END;`,
+  `CREATE TABLE locks (
+    name TEXT PRIMARY KEY,
+    owner_pid INTEGER NOT NULL CHECK (owner_pid > 0),
+    heartbeat_at TEXT NOT NULL,
+    acquired_at TEXT NOT NULL,
+    child_pid INTEGER
+  );`,
 ] as const;
 
 export const schemaVersion = migrations.length;

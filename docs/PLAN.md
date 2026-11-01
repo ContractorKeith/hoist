@@ -63,7 +63,7 @@ Ubuntu LTS server and in GitHub Actions.
 | 6 | SSH forced command dispatching `git-receive-pack` and CLI verbs | v1 | M1 | One `authorized_keys` line per key, `command="hoist ssh-dispatch"` |
 | 7 | `pre-receive` builds Dockerfile into `hoist/<app>:<slug>-v<number>-<sha12>` and streams the log to the pusher | v1 | M1 | Dockerfile only; build log saved per release |
 | 8 | Release row written on successful build: number, image, sha, branch, config snapshot | v1 | M1 | Immutable; see CONTEXT.md |
-| 9 | Cutover: start new container, health check, swap Caddy upstream, stop old | v1 | M2 | Default `GET /`, 30 s timeout, configurable path |
+| 9 | Cutover: start new container, health check, swap Caddy upstream, stop old | v1 | M2 | Default `GET /`, 2xx only (reject redirects to catch misconfigured paths), 30 s timeout, configurable path |
 | 10 | Caddy supervised by hoist; routes written via admin API; Let's Encrypt on by default | v1 | M2 | Internal CA when `HOIST_TLS=internal` (tests) |
 | 11 | `config:set`, `config:unset`, `config:list` with masked values | v1 | M3 | Encrypted at rest with a key in the data dir |
 | 12 | `rollback <app> [vN]` creates a new release from an old image + config snapshot | v1 | M3 | Defaults to previous release |
@@ -110,6 +110,7 @@ Rules that hold the shape:
   queue, no worker pool.
 - Caddy runs on the host, so containers publish their app port to a loopback-only host port and
   Caddy dials `127.0.0.1:<port>`. Nothing is published on a non-loopback interface.
+- Pre-receive cutover rechecks the expected old branch tip because Git commits refs only after the hook succeeds; this preserves non-zero push results on health failure.
 - Every value from a pushed repo (branch name, Dockerfile output, health path) is untrusted.
   Slugify, clamp and validate before it reaches Docker, Caddy or a filename.
 
@@ -123,6 +124,7 @@ config      app_id, key, value (encrypted)       -- current config; snapshotted 
 previews    app_id, branch, slug, last_push_at    -- current release is the newest live release
                                                    for (app_id, branch)
 sessions    token_hash, expires_at
+locks       name (primary key), owner_pid, heartbeat_at, acquired_at, child_pid (nullable)
 ```
 
 `number` is per `(app_id, branch)`; image tags are `hoist/<app>:<branch-slug>-v<number>-<sha12>`, unique to each release. Main-branch releases are `v1, v2, ...`; a preview has its own

@@ -1,4 +1,4 @@
-import type { DockerClient } from "../adapters/interfaces";
+import type { DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
 import { nextReleaseNumber } from "./releases";
 import { branchSlug } from "./validation";
@@ -114,4 +114,27 @@ export async function removeReleaseImages(
       /* Keep cleaning the remaining images. */
     }
   }
+}
+
+// Retry dependent images only while the full labelled listing shrinks.
+export async function removeImages(
+  docker: DockerClient,
+  labels: Labels,
+): Promise<void> {
+  let previous = Number.POSITIVE_INFINITY;
+  for (let iteration = 0; iteration < 10; iteration++) {
+    const images = await docker.listImages(labels);
+    if (!images.length) return;
+    if (images.length >= previous)
+      throw new Error(
+        `image cleanup did not shrink; images left: ${images.join(", ")}`,
+      );
+    previous = images.length;
+    for (const image of images) await docker.removeImage(image).catch(() => {});
+  }
+  const images = await docker.listImages(labels);
+  if (images.length)
+    throw new Error(
+      `image cleanup exceeded 10 iterations; images left: ${images.join(", ")}`,
+    );
 }

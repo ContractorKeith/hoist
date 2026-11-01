@@ -11,6 +11,31 @@ export class FakeDocker implements DockerClient {
   readonly calls: { method: string; args: unknown[] }[] = [];
   readonly containers = new Map<string, Container>();
   readonly images = new Map<string, Labels>();
+  readonly running = new Set<string>();
+  exposedPorts: number[] = [8080];
+  async imagePorts(image: string): Promise<number[]> {
+    this.record("imagePorts", image);
+    return [...this.exposedPorts];
+  }
+  async inspectContainer(
+    id: string,
+    appPort = 8080,
+  ): Promise<{
+    running: boolean;
+    port: number;
+    appPort: number;
+    labels: Labels;
+  } | null> {
+    this.record("inspectContainer", id);
+    return this.containers.has(id)
+      ? {
+          running: this.running.has(id),
+          appPort,
+          labels: structuredClone(this.containers.get(id)?.labels ?? {}),
+          port: 30000 + Number.parseInt(id.slice(-4), 16),
+        }
+      : null;
+  }
   private sequence = 0;
 
   private record(method: string, ...args: unknown[]): void {
@@ -41,13 +66,16 @@ export class FakeDocker implements DockerClient {
   }
   async startContainer(id: string): Promise<void> {
     this.record("startContainer", id);
+    this.running.add(id);
   }
   async stopContainer(id: string): Promise<void> {
     this.record("stopContainer", id);
+    this.running.delete(id);
   }
   async removeContainer(id: string): Promise<void> {
     this.record("removeContainer", id);
     this.containers.delete(id);
+    this.running.delete(id);
   }
   async containerLogs(
     id: string,

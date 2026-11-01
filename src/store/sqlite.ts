@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { privatePath } from "../data";
-import type { App, Release, Store } from "./interface";
+import type { App, LockClaim, LockRow, Release, Store } from "./interface";
 import { migrations, schemaVersion } from "./migrations";
 
 export class SqliteStore implements Store {
@@ -105,17 +105,91 @@ export class SqliteStore implements Store {
   }
   completeRelease(id: number): void {
     const result = this.db.run(
-      "UPDATE releases SET status = 'built' WHERE id = ?",
+      "UPDATE releases SET status = 'built' WHERE id = ? AND status = 'building'",
+      [id],
+    );
+    if (!result.changes)
+      throw new Error(`release ${id} no longer exists or status changed`);
+  }
+  failRelease(id: number): void {
+    const result = this.db.run(
+      "UPDATE releases SET status = 'failed' WHERE id = ? AND status NOT IN ('live', 'stopped')",
       [id],
     );
     if (!result.changes) throw new Error(`release ${id} no longer exists`);
   }
-  failRelease(id: number): void {
+
+  setReleaseState(
+    id: number,
+    status: "live" | "stopped",
+    containerId: string | null = null,
+    expectedStatus: "built" | "live" = status === "live" ? "built" : "live",
+  ): void {
     const result = this.db.run(
-      "UPDATE releases SET status = 'failed' WHERE id = ?",
-      [id],
+      "UPDATE releases SET status = ?, container_id = ? WHERE id = ? AND status = ?",
+      [status, containerId, id, expectedStatus],
     );
     if (!result.changes) throw new Error(`release ${id} no longer exists`);
+  }
+
+  lock(name: string): LockRow | null {
+    return this.db
+      .query<LockRow, [string]>("SELECT * FROM locks WHERE name = ?")
+      .get(name);
+  }
+  acquireLock(
+    name: string,
+    pid: number,
+    now: string,
+    alive: (pid: number) => boolean,
+  ): LockClaim {
+    return this.transaction(() => {
+      const previous = this.lock(name);
+      if (
+        previous &&
+        alive(previous.owner_pid) &&
+        Date.parse(previous.heartbeat_at) > Date.parse(now) - 60000
+      )
+        return { acquired: false, ownerPid: previous.owner_pid };
+      this.db.run(
+        "INSERT INTO locks (name, owner_pid, heartbeat_at, acquired_at, child_pid) VALUES (?, ?, ?, ?, NULL) ON CONFLICT(name) DO UPDATE SET owner_pid=excluded.owner_pid, heartbeat_at=excluded.heartbeat_at, acquired_at=excluded.acquired_at",
+        [name, pid, now, now],
+      );
+      return { acquired: true, previous };
+    });
+  }
+  refreshLock(
+    name: string,
+    pid: number,
+    acquiredAt: string,
+    now: string,
+  ): boolean {
+    return (
+      this.db.run(
+        "UPDATE locks SET heartbeat_at = ? WHERE name = ? AND owner_pid = ? AND acquired_at = ?",
+        [now, name, pid, acquiredAt],
+      ).changes === 1
+    );
+  }
+  releaseLock(name: string, pid: number, acquiredAt: string): void {
+    this.db.run(
+      "DELETE FROM locks WHERE name = ? AND owner_pid = ? AND acquired_at = ?",
+      [name, pid, acquiredAt],
+    );
+  }
+  setLockChild(
+    name: string,
+    pid: number,
+    acquiredAt: string,
+    childPid: number | null,
+  ): void {
+    if (
+      !this.db.run(
+        "UPDATE locks SET child_pid = ? WHERE name = ? AND owner_pid = ? AND acquired_at = ?",
+        [childPid, name, pid, acquiredAt],
+      ).changes
+    )
+      throw new Error(`lock ${name} ownership changed`);
   }
 
   close(): void {
