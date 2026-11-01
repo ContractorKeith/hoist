@@ -1,4 +1,4 @@
-import type { DockerClient } from "../adapters/interfaces";
+import type { DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
 import { nextReleaseNumber } from "./releases";
 import { branchSlug } from "./validation";
@@ -113,5 +113,17 @@ export async function removeReleaseImages(
     } catch {
       /* Keep cleaning the remaining images. */
     }
+  }
+}
+
+// Removing a leaf can expose another labelled parent in Docker's image listing.
+export async function removeImages(
+  docker: DockerClient,
+  labels: Labels,
+): Promise<void> {
+  while (true) {
+    const images = await docker.listImages(labels);
+    if (!images.length) return;
+    for (const image of images) await docker.removeImage(image);
   }
 }

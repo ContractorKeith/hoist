@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Docker } from "../../src/adapters/docker";
+import { FakeCaddy } from "../../src/adapters/fakes/caddy";
 import { FakeDocker } from "../../src/adapters/fakes/docker";
 import { FakeStore } from "../../src/adapters/fakes/store";
 import { parseCli } from "../../src/cli/index";
@@ -31,9 +32,15 @@ test("destroy refuses an in-flight build without touching images, files or rows"
   const row = reserveRelease(store, app, "main", sha);
   let cleaned = false;
   await expect(
-    destroyApp(store, docker, app, async () => {
-      cleaned = true;
-    }),
+    destroyApp(
+      store,
+      docker,
+      app,
+      async () => {
+        cleaned = true;
+      },
+      new FakeCaddy(),
+    ),
   ).rejects.toThrow(
     "a build is in progress for hello; wait for it to finish and retry",
   );
@@ -42,9 +49,15 @@ test("destroy refuses an in-flight build without touching images, files or rows"
   expect(store.app("hello")).toEqual(app);
   expect(row.status).toBe("building");
   store.completeRelease(row.id);
-  await destroyApp(store, docker, app, async () => {
-    cleaned = true;
-  });
+  await destroyApp(
+    store,
+    docker,
+    app,
+    async () => {
+      cleaned = true;
+    },
+    new FakeCaddy(),
+  );
   expect(cleaned).toBe(true);
   expect(store.apps()).toEqual([]);
 });
@@ -204,6 +217,7 @@ test("receive rejects non-commit objects before reserving or preparing", async (
       app,
       `${zero} ${sha} refs/heads/main\n`,
       new AbortController().signal,
+      { caddy: new FakeCaddy(), health: async () => {} },
       async () => {
         prepared = true;
         throw new Error("unexpected checkout");
@@ -231,6 +245,7 @@ test("receive detects branch movement after building and removes the rejected im
         app,
         `${zero} ${sha} refs/heads/main\n`,
         new AbortController().signal,
+        { caddy: new FakeCaddy(), health: async () => {} },
         async () => ({ path: root, cleanup: async () => {} }),
         { objectType: async () => "commit", head: async () => "b".repeat(40) },
       ),
@@ -261,11 +276,14 @@ test("receive accepts an unchanged existing branch and checks it before marking 
       app,
       `${old} ${sha} refs/heads/main\n`,
       new AbortController().signal,
+      { caddy: new FakeCaddy(), health: async () => {} },
       async () => ({ path: root, cleanup: async () => {} }),
       {
         objectType: async () => "commit",
         head: async () => {
-          expect(store.rows[0]?.status).toBe("building");
+          expect(["building", "built"]).toContain(
+            store.rows[0]?.status ?? "missing",
+          );
           expect(docker.images.size).toBe(1);
           checked = true;
           return old;
@@ -273,7 +291,44 @@ test("receive accepts an unchanged existing branch and checks it before marking 
       },
     );
     expect(checked).toBe(true);
-    expect(store.rows[0]?.status).toBe("built");
+    expect(store.rows[0]?.status).toBe("live");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("receive rechecks the branch after completeRelease and skips cutover if it moved", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hoist-cutover-tip-"));
+  const store = new FakeStore(),
+    docker = new FakeDocker(),
+    caddy = new FakeCaddy();
+  const app = store.createApp("hello", "hello.test", "/");
+  try {
+    await writeFile(join(root, "Dockerfile"), "FROM scratch\n");
+    await expect(
+      receive(
+        root,
+        store,
+        docker,
+        app,
+        `${zero} ${sha} refs/heads/main\n`,
+        new AbortController().signal,
+        { caddy, health: async () => {} },
+        async () => ({ path: root, cleanup: async () => {} }),
+        {
+          objectType: async () => "commit",
+          head: async () =>
+            store.rows[0]?.status === "building" ? null : "b".repeat(40),
+        },
+      ),
+    ).rejects.toThrow(
+      "branch main tip is bbbbbbbbbbbb, not this release; skipping cutover",
+    );
+    expect(store.rows[0]?.status).toBe("failed");
+    expect(docker.calls.some((call) => call.method === "createContainer")).toBe(
+      false,
+    );
+    expect(caddy.calls).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -65,7 +65,11 @@ export class FakeStore implements Store {
       )
     )
       throw new Error("Duplicate release");
-    const row = { ...input, id: this.rows.length + 1 };
+    const row = {
+      created_at: new Date().toISOString(),
+      ...input,
+      id: this.rows.length + 1,
+    };
     this.rows.push(row);
     return row;
   }
@@ -73,6 +77,16 @@ export class FakeStore implements Store {
     const row = this.rows.find((r) => r.id === id);
     if (!row) throw new Error(`release ${id} no longer exists`);
     row.status = "built";
+  }
+  setReleaseState(
+    id: number,
+    status: Release["status"],
+    containerId: string | null = null,
+  ): void {
+    const row = this.rows.find((r) => r.id === id);
+    if (!row) throw new Error(`release ${id} no longer exists`);
+    row.status = status;
+    row.container_id = containerId;
   }
   failRelease(id: number): void {
     const row = this.rows.find((r) => r.id === id);

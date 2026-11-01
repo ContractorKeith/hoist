@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FakeCaddy } from "../../src/adapters/fakes/caddy";
 import { FakeDocker } from "../../src/adapters/fakes/docker";
 import { FakeStore } from "../../src/adapters/fakes/store";
 import { parseCli } from "../../src/cli/index";
@@ -278,9 +279,15 @@ test("app lifecycle uses fake seams and refuses duplicate creation", async () =>
   expect(reserveRelease(store, app, "main", sha).number).toBe(1);
   expect(reserveRelease(store, app, "main", sha).number).toBe(2);
   for (const row of store.rows) store.completeRelease(row.id);
-  await destroyApp(store, docker, app, async () => {
-    cleaned++;
-  });
+  await destroyApp(
+    store,
+    docker,
+    app,
+    async () => {
+      cleaned++;
+    },
+    new FakeCaddy(),
+  );
   expect(cleaned).toBe(1);
   expect(store.apps()).toEqual([]);
   expect(store.releases(app.id)).toEqual([]);
@@ -354,6 +361,7 @@ test("receive fails and cleans every reserved release when the second ref cannot
         app,
         `${zero} ${sha} refs/heads/main\n${zero} ${sha} refs/heads/feature-x\n`,
         new AbortController().signal,
+        { caddy: new FakeCaddy(), health: async () => {} },
         async () => {
           if (++prepared === 2) throw error;
           return { path: root, cleanup: async () => {} };
@@ -470,6 +478,7 @@ test("tag-only and delete-only pushes explain that nothing was built", async () 
         app,
         input,
         new AbortController().signal,
+        { caddy: new FakeCaddy(), health: async () => {} },
       );
     }
     expect(stderr.mock.calls).toEqual([

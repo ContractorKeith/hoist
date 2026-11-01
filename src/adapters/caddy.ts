@@ -15,11 +15,19 @@ export class Caddy implements CaddyAdmin {
     path: string,
     init: RequestInit = {},
   ): Promise<Response> {
-    const response = await fetch(`${this.base}${path}`, {
-      signal: AbortSignal.timeout(30000),
-      ...init,
-      headers: { "Content-Type": "application/json", ...init.headers },
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.base}${path}`, {
+        signal: AbortSignal.timeout(30000),
+        ...init,
+        headers: { "Content-Type": "application/json", ...init.headers },
+      });
+    } catch (error) {
+      throw new Error(
+        `Caddy admin API not reachable at ${this.base}; is \`hoist serve\` running?`,
+        { cause: error },
+      );
+    }
     if (!response.ok)
       throw new Error(
         `Caddy ${init.method ?? "GET"} ${path}: ${response.status} ${await response.text()}`,
@@ -28,6 +36,27 @@ export class Caddy implements CaddyAdmin {
   }
 
   async loadConfig(config: CaddyConfig): Promise<void> {
+    const apps = config.apps as
+      | {
+          http?: {
+            servers?: {
+              hoist?: {
+                routes?: {
+                  match: { host: string[] }[];
+                  handle: { upstreams: { dial: string }[] }[];
+                }[];
+              };
+            };
+          };
+        }
+      | undefined;
+    for (const route of apps?.http?.servers?.hoist?.routes ?? []) {
+      for (const match of route.match)
+        for (const host of match.host) validate.hostName(host);
+      for (const handle of route.handle)
+        for (const upstream of handle.upstreams)
+          validate.upstreamAddress(upstream.dial);
+    }
     await this.request("/load", {
       method: "POST",
       body: JSON.stringify(config),

@@ -11,8 +11,8 @@ export interface ContainerSpec {
   image: string;
   labels: Labels;
   port: number;
-  // A loopback-only published port for Caddy to reach.
-  publishPort: number;
+  // A loopback-only published port; empty asks Docker to allocate it atomically.
+  publishPort: number | "";
   config?: Record<string, string>;
 }
 
@@ -24,6 +24,10 @@ export interface Container {
 
 export interface DockerClient {
   ping(): Promise<void>;
+  imagePorts(image: string): Promise<number[]>;
+  inspectContainer(
+    id: string,
+  ): Promise<{ running: boolean; port: number } | null>;
   // Consume the stream to finish the build; stream errors fail the build.
   // Cancellation or signal abort closes the connection. The caller owns the deadline;
   // builds have no default timeout.

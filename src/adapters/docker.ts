@@ -37,7 +37,7 @@ export class Docker implements DockerClient {
         { cause: error },
       );
     }
-    if (!response.ok)
+    if (!response.ok && response.status !== 304)
       throw new Error(
         `Docker ${init.method ?? "GET"} ${path}: ${response.status} ${await response.text()}`,
       );
@@ -140,17 +140,64 @@ export class Docker implements DockerClient {
     }
   }
 
+  async imagePorts(image: string): Promise<number[]> {
+    validate.imageName(image);
+    const row = (await (
+      await this.request(`/images/${encodeURIComponent(image)}/json`)
+    ).json()) as { Config: { ExposedPorts?: Record<string, unknown> } };
+    return Object.keys(row.Config.ExposedPorts ?? {}).map((key) => {
+      if (!/^[0-9]+\/tcp$/.test(key)) return 0;
+      const port = Number(key.split("/")[0]);
+      validate.port(port);
+      return port;
+    });
+  }
+
+  async inspectContainer(
+    id: string,
+  ): Promise<{ running: boolean; port: number } | null> {
+    validate.containerId(id);
+    let response: Response;
+    try {
+      response = await this.request(`/containers/${id}/json`);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes(": 404 "))
+        return null;
+      throw error;
+    }
+    const row = (await response.json()) as {
+      State: { Running: boolean };
+      NetworkSettings: {
+        Ports: Record<string, { HostIp: string; HostPort: string }[] | null>;
+      };
+    };
+    const bindings = Object.values(row.NetworkSettings.Ports ?? {})
+      .flatMap((value) => value ?? [])
+      .filter((value) => value.HostIp === "127.0.0.1");
+    const port = Number(bindings[0]?.HostPort ?? 0);
+    if (row.State.Running) validate.port(port);
+    return { running: row.State.Running, port };
+  }
+
   async createContainer(input: ContainerSpec): Promise<string> {
     validate.imageName(input.image);
     validate.labels(input.labels);
     validate.port(input.port);
-    validate.port(input.publishPort);
+    if (input.publishPort !== "") validate.port(input.publishPort);
+    if (
+      input.config !== undefined &&
+      (input.config === null ||
+        Array.isArray(input.config) ||
+        typeof input.config !== "object")
+    )
+      throw new Error("Invalid container config");
     const config = Object.entries(input.config ?? {});
     if (
       config.length > 256 ||
       config.some(
         ([key, value]) =>
           !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) ||
+          typeof value !== "string" ||
           value.includes("\0") ||
           value.length > 65536,
       )

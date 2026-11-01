@@ -47,6 +47,9 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
   tested on fakes. Adapters are thin and covered by e2e only.
 - Everything from a pushed repo is untrusted: slugify branch names, validate health paths,
   clamp sizes before Docker, Caddy or the filesystem see them.
+- Run `hoist serve` before pushing; it supervises Caddy and reconciles interrupted builds, live containers and orphan containers on boot.
+- `HOIST_TLS=acme` (default) uses Let's Encrypt with `HOIST_ACME_EMAIL`; `internal` uses the local CA. `HOIST_HTTP_PORT`/`HOIST_HTTPS_PORT` default to 80/443; `HOIST_CADDY_ADMIN_PORT` defaults to 2019 and must match in serve and hooks. Caddy data lives in `HOIST_DIR/caddy`.
+- Containers use the image's single exposed TCP port, otherwise config `PORT` or 8080; Docker assigns the loopback-only published port.
 - One process. Caddy is a supervised child; the preview sweeper is a timer. No queue.
 - A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
   change during cutover. Delete is governed by retention (M3).

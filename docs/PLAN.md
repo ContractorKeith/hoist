@@ -110,6 +110,7 @@ Rules that hold the shape:
   queue, no worker pool.
 - Caddy runs on the host, so containers publish their app port to a loopback-only host port and
   Caddy dials `127.0.0.1:<port>`. Nothing is published on a non-loopback interface.
+- Pre-receive cutover rechecks the expected old branch tip because Git commits refs only after the hook succeeds; this preserves non-zero push results on health failure.
 - Every value from a pushed repo (branch name, Dockerfile output, health path) is untrusted.
   Slugify, clamp and validate before it reaches Docker, Caddy or a filename.
 

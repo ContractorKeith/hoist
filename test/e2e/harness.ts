@@ -9,19 +9,47 @@ import type { CaddyConfig } from "../../src/adapters/interfaces";
 import { SqliteStore } from "../../src/store/sqlite";
 import { caddyLogs } from "./caddy-logs";
 
+// Keep leases until immediately before spawning the listener owner.
+export async function reservePorts(
+  count: number,
+): Promise<{ ports: number[]; release: () => Promise<void> }> {
+  const servers: ReturnType<typeof createServer>[] = [];
+  const ports: number[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const server = createServer();
+      servers.push(server);
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", resolve);
+      });
+      const address = server.address();
+      if (!address || typeof address === "string")
+        throw new Error("No port allocated");
+      ports.push(address.port);
+    }
+  } catch (error) {
+    for (const server of servers) server.close();
+    throw error;
+  }
+  return {
+    ports,
+    release: async () => {
+      await Promise.all(
+        servers.map(
+          (server) =>
+            new Promise<void>((resolve, reject) =>
+              server.close((error) => (error ? reject(error) : resolve())),
+            ),
+        ),
+      );
+    },
+  };
+}
 export async function highPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  if (!address || typeof address === "string")
-    throw new Error("No port allocated");
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return address.port;
+  const lease = await reservePorts(1);
+  await lease.release();
+  return lease.ports[0] as number;
 }
 
 async function assertPortClosed(port: number): Promise<void> {
@@ -84,9 +112,8 @@ export async function withHarness(
     store = new SqliteStore(dataDir);
     await docker.ping();
     const binary = await ensureCaddy();
-    const ports = new Set<number>();
-    while (ports.size < 3) ports.add(await highPort());
-    const [adminPort, httpsPort, appPort] = [...ports] as [
+    const lease = await reservePorts(3);
+    const [adminPort, httpsPort, appPort] = lease.ports as [
       number,
       number,
       number,
@@ -116,6 +143,7 @@ export async function withHarness(
     };
     const configPath = join(dataDir, "caddy.json");
     await Bun.write(configPath, JSON.stringify(config));
+    await lease.release();
     const caddyProcess = Bun.spawn([binary, "run", "--config", configPath], {
       env: {
         ...process.env,

@@ -118,6 +118,18 @@ export class SqliteStore implements Store {
     if (!result.changes) throw new Error(`release ${id} no longer exists`);
   }
 
+  setReleaseState(
+    id: number,
+    status: Release["status"],
+    containerId: string | null = null,
+  ): void {
+    const result = this.db.run(
+      "UPDATE releases SET status = ?, container_id = ? WHERE id = ?",
+      [status, containerId, id],
+    );
+    if (!result.changes) throw new Error(`release ${id} no longer exists`);
+  }
+
   close(): void {
     this.db.close();
   }

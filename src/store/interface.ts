@@ -12,6 +12,8 @@ export interface Release {
   git_sha: string;
   image: string;
   config_json: string;
+  container_id?: string | null;
+  created_at?: string;
   status: "building" | "built" | "failed" | "live" | "stopped";
 }
 export interface Store {
@@ -25,4 +27,9 @@ export interface Store {
   insertRelease(input: Omit<Release, "id">): Release;
   completeRelease(id: number): void;
   failRelease(id: number): void;
+  setReleaseState(
+    id: number,
+    status: Release["status"],
+    containerId?: string | null,
+  ): void;
 }
