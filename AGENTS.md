@@ -59,11 +59,13 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - Commits: `<type>: <description>`, author @ContractorKeith only.
 
 ## Tracking
-
-- GitHub issues are the tickets, one per milestone, label `milestone`.
-- Basecamp project "github" (card table) has one card per milestone titled `hoist Mn: ...`
-  linking the issue and the PLAN section. Move the card to In progress when the branch opens
-  and to Done when the PR merges. Do not create per-issue cards.
+- GitHub issues are the tickets, one per milestone, label `milestone`; `skeptic` for review findings.
+- Basecamp project "github" (card table) has ONE card titled `hoist` with one step per
+  milestone (`project-board` skill). Complete the step when the milestone PR merges; update
+  "Next:" in the body. No per-milestone cards.
+- Per PR: author's done-when → orchestrator full-diff read and rerun → `pr-attack` by a fresh
+  thread → fixes → one PR comment → `gh pr ready` → merge commit. `skeptic-review` is the
+  release gate before a tag, not a per-PR step.
 
 ## Out of Scope
 
