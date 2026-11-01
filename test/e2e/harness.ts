@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Caddy } from "../../src/adapters/caddy";
@@ -21,6 +21,26 @@ export async function highPort(): Promise<number> {
     server.close((error) => (error ? reject(error) : resolve())),
   );
   return address.port;
+}
+
+async function assertPortClosed(port: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    socket.setTimeout(2000);
+    socket.once("connect", () => {
+      socket.destroy();
+      reject(new Error(`Caddy port ${port} still accepts connections`));
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      reject(new Error(`Caddy port ${port} did not refuse connections`));
+    });
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      socket.destroy();
+      if (error.code === "ECONNREFUSED") resolve();
+      else reject(error);
+    });
+  });
 }
 
 export async function eventually(
@@ -47,6 +67,7 @@ export async function withHarness(
     appPort: number;
     labels: Record<string, string>;
     tag: string;
+    ca: string;
   }) => Promise<void>,
 ): Promise<void> {
   const docker = new Docker();
@@ -56,6 +77,7 @@ export async function withHarness(
   let child: ReturnType<typeof Bun.spawn> | undefined;
   let childLogs: Promise<string> | undefined;
   let store: SqliteStore | undefined;
+  let caddyPorts: number[] = [];
   const failures: unknown[] = [];
   try {
     store = new SqliteStore(dataDir);
@@ -68,6 +90,7 @@ export async function withHarness(
       number,
       number,
     ];
+    caddyPorts = [adminPort, httpsPort];
     const caddy = new Caddy(adminPort);
     const config: CaddyConfig = {
       admin: { listen: `127.0.0.1:${adminPort}`, config: { persist: false } },
@@ -95,7 +118,6 @@ export async function withHarness(
     const caddyProcess = Bun.spawn([binary, "run", "--config", configPath], {
       env: {
         ...process.env,
-        HOIST_TLS: "internal",
         XDG_DATA_HOME: dataDir,
         XDG_CONFIG_HOME: dataDir,
       },
@@ -107,14 +129,11 @@ export async function withHarness(
     await eventually(async () => {
       await caddy.loadConfig(config);
     });
-    await run({ docker, caddy, httpsPort, appPort, labels, tag });
-    // Prove the harness used the internal CA, without changing the machine's trust store.
-    const certificate = await readFile(
+    const ca = await readFile(
       join(dataDir, "caddy/pki/authorities/local/root.crt"),
       "utf8",
     );
-    if (!certificate.includes("BEGIN CERTIFICATE"))
-      throw new Error("Internal CA was not created");
+    await run({ docker, caddy, httpsPort, appPort, labels, tag, ca });
   } catch (error) {
     failures.push(error);
   }
@@ -132,8 +151,8 @@ export async function withHarness(
         await docker.removeContainer(container.id);
     });
     await attempt(async () => {
-      for (const image of await docker.listImages(labels))
-        await docker.removeImage(image);
+      if ((await docker.listImages(labels)).length)
+        await docker.removeImage(tag);
     });
     if (child) {
       const process = child;
@@ -141,16 +160,8 @@ export async function withHarness(
       await Promise.race([process.exited, Bun.sleep(3000)]);
       if (process.exitCode === null) process.kill("SIGKILL");
       await process.exited;
-      await attempt(async () => {
-        try {
-          globalThis.process.kill(process.pid, 0);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
-          throw error;
-        }
-        throw new Error(`Caddy process ${process.pid} is still running`);
-      });
     }
+    for (const port of caddyPorts) await attempt(() => assertPortClosed(port));
     await attempt(async () => {
       if ((await docker.listContainers(labels)).length)
         throw new Error("Leftover test containers");
@@ -163,12 +174,13 @@ export async function withHarness(
       store?.close();
       await rm(dataDir, { recursive: true, force: true });
     });
-    if (!teardownErrors.length)
-      console.log(
-        "Teardown verified: Caddy process absent; 0 containers and 0 images with hoist test label; temp data dir removed.",
-      );
     failures.push(...teardownErrors);
   }
+  if (failures.length === 0)
+    console.log(
+      "Teardown verified: Caddy admin and HTTPS ports refuse TCP connections; 0 containers and 0 images with hoist test label; temp data dir removed.",
+    );
+
   if (failures.length)
     throw new AggregateError(
       failures,

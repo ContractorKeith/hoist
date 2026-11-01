@@ -25,12 +25,16 @@ export interface Container {
 export interface DockerClient {
   ping(): Promise<void>;
   // Consume the stream to finish the build; stream errors fail the build.
-  buildImage(input: BuildImage): Promise<LogStream>;
+  buildImage(input: BuildImage, signal?: AbortSignal): Promise<LogStream>;
   createContainer(input: ContainerSpec): Promise<string>;
   startContainer(id: string): Promise<void>;
   stopContainer(id: string): Promise<void>;
   removeContainer(id: string): Promise<void>;
-  containerLogs(id: string, follow?: boolean): Promise<LogStream>;
+  containerLogs(
+    id: string,
+    follow?: boolean,
+    signal?: AbortSignal,
+  ): Promise<LogStream>;
   listContainers(labels: Labels): Promise<Container[]>;
   listImages(labels: Labels): Promise<string[]>;
   removeImage(image: string): Promise<void>;

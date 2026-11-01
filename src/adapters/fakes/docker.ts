@@ -14,13 +14,21 @@ export class FakeDocker implements DockerClient {
   private sequence = 0;
 
   private record(method: string, ...args: unknown[]): void {
-    this.calls.push({ method, args: structuredClone(args) });
+    this.calls.push({
+      method,
+      args: args.map((arg) =>
+        arg instanceof AbortSignal ? arg : structuredClone(arg),
+      ),
+    });
   }
   async ping(): Promise<void> {
     this.record("ping");
   }
-  async buildImage(input: BuildImage): Promise<LogStream> {
-    this.record("buildImage", input);
+  async buildImage(
+    input: BuildImage,
+    signal?: AbortSignal,
+  ): Promise<LogStream> {
+    this.record("buildImage", input, signal);
     this.images.set(input.tag, structuredClone(input.labels));
     return new Blob(["built\n"]).stream();
   }
@@ -44,8 +52,12 @@ export class FakeDocker implements DockerClient {
     this.record("removeContainer", id);
     this.containers.delete(id);
   }
-  async containerLogs(id: string, follow = false): Promise<LogStream> {
-    this.record("containerLogs", id, follow);
+  async containerLogs(
+    id: string,
+    follow = false,
+    signal?: AbortSignal,
+  ): Promise<LogStream> {
+    this.record("containerLogs", id, follow, signal);
     return new Blob(["hello\n"]).stream();
   }
   async listContainers(labels: Labels): Promise<Container[]> {

@@ -11,6 +11,7 @@ export function hostName(value: string): void {
   if (
     value.length > 253 ||
     !value.includes(".") ||
+    /^[0-9]+$/.test(value.split(".").at(-1) ?? "") ||
     !value
       .split(".")
       .every((part) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part))

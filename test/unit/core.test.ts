@@ -27,15 +27,19 @@ test("in-memory adapters implement the typed seams and record calls", async () =
   const docker: DockerClient = fakeDocker;
   const fakeCaddy = new FakeCaddy();
   const caddy: CaddyAdmin = fakeCaddy;
+  const signal = new AbortController().signal;
   const labels = { "hoist.test": "unit" };
   await docker.ping();
   expect(
     await new Response(
-      await docker.buildImage({
-        contextDir: "/fixture",
-        tag: "hoist/hello:unit",
-        labels,
-      }),
+      await docker.buildImage(
+        {
+          contextDir: "/fixture",
+          tag: "hoist/hello:unit",
+          labels,
+        },
+        signal,
+      ),
     ).text(),
   ).toContain("built");
   const id = await docker.createContainer({
@@ -46,9 +50,15 @@ test("in-memory adapters implement the typed seams and record calls", async () =
   });
   await docker.startContainer(id);
   expect(await docker.listContainers(labels)).toHaveLength(1);
-  expect(await new Response(await docker.containerLogs(id)).text()).toContain(
-    "hello",
-  );
+  expect(
+    await new Response(await docker.containerLogs(id, true, signal)).text(),
+  ).toContain("hello");
+  expect(
+    fakeDocker.calls.find((call) => call.method === "containerLogs")?.args[2],
+  ).toBe(signal);
+  expect(
+    fakeDocker.calls.find((call) => call.method === "buildImage")?.args[1],
+  ).toBe(signal);
   await caddy.loadConfig({});
   await caddy.upsertRoute("hello.test", "127.0.0.1:18080");
   expect(fakeCaddy.routes.get("hello.test")).toBe("127.0.0.1:18080");

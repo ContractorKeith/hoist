@@ -1,22 +1,17 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { Docker } from "../../src/adapters/docker";
 import { eventually, withHarness } from "./harness";
 
-// Bun replaces argv with the current test filename, so inspect the original Linux command.
-// A bare unit run must never require Docker or download Caddy.
-const explicitE2e =
-  process.platform === "linux" &&
-  readFileSync("/proc/self/cmdline", "utf8")
-    .split("\0")
-    .some((arg) => arg.includes("test/e2e"));
-const scenario = explicitE2e ? test : test.skip;
+const enabled = process.env.HOIST_E2E !== undefined;
+const scenario = enabled ? test : test.skip;
 
 scenario(
   "real Docker and internal-CA Caddy serve the fixture and tear down cleanly",
   async () => {
+    if (process.platform !== "linux") throw new Error("E2e requires Linux");
     await withHarness(
-      async ({ docker, caddy, httpsPort, appPort, labels, tag }) => {
+      async ({ docker, caddy, httpsPort, appPort, labels, tag, ca }) => {
         // Invalid untrusted values must fail before reaching either daemon.
         await expect(
           caddy.upsertRoute("bad/host", `127.0.0.1:${appPort}`),
@@ -39,6 +34,12 @@ scenario(
           }),
         ).rejects.toThrow("port");
 
+        await expect(
+          caddy.upsertRoute("127.0.0.1", `127.0.0.1:${appPort}`),
+        ).rejects.toThrow("host name");
+        expect(() => new Docker("tcp://127.0.0.1:2375")).toThrow(
+          "only unix sockets",
+        );
         const logs = await docker.buildImage({
           contextDir: resolve("test/fixtures/hello"),
           tag,
@@ -69,7 +70,7 @@ scenario(
         const request = () =>
           fetch(`https://127.0.0.1:${httpsPort}/`, {
             headers: { Host: "hello.test" },
-            tls: { rejectUnauthorized: false, serverName: "hello.test" },
+            tls: { ca, serverName: "hello.test" },
             signal: AbortSignal.timeout(2000),
           });
         await eventually(async () => {

@@ -19,10 +19,10 @@ bun install
 bun run typecheck          # tsc --noEmit
 bun run lint               # biome check .
 bun run test               # bun test (unit; no Docker)
-bun run test:e2e           # bun test test/e2e (real Docker + Caddy)
+bun run test:e2e           # HOIST_E2E=1 bun test test/e2e (real Docker + Caddy)
 bun run build              # bun build --compile src/cli/index.ts --outfile dist/hoist
 ```
-Bare `bun test` skips the e2e scenario; an explicit `test/e2e` argument enables it.
+Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIST_E2E=1` and fails if Linux or Docker is unavailable.
 
 ## Pointers
 

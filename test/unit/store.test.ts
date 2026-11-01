@@ -7,10 +7,13 @@ import { SqliteStore } from "../../src/store/sqlite";
 
 const dirs: string[] = [];
 const stores: SqliteStore[] = [];
-function open(): SqliteStore {
+function dataDirectory(): string {
   const dir = mkdtempSync(join(tmpdir(), "hoist-unit-"));
   dirs.push(dir);
-  const store = new SqliteStore(join(dir, "data"));
+  return join(dir, "data");
+}
+function open(dir = dataDirectory()): SqliteStore {
+  const store = new SqliteStore(dir);
   stores.push(store);
   return store;
 }
@@ -28,6 +31,7 @@ test("fresh data directory migrates to the recorded current schema in WAL mode",
   expect(db.query("PRAGMA journal_mode").get()).toEqual({
     journal_mode: "wal",
   });
+  expect(db.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
   expect(
     db
       .query(
@@ -41,24 +45,36 @@ test("fresh data directory migrates to the recorded current schema in WAL mode",
   );
 });
 
-test("re-running migrations preserves schema and data", () => {
-  const store = open();
+test("reopening the store preserves schema and data", () => {
+  const dir = dataDirectory();
+  const store = open(dir);
   store.db.run(
     "INSERT INTO apps (name, domain) VALUES ('hello', 'hello.example.test')",
   );
   const before = store.db
     .query("SELECT * FROM sqlite_master ORDER BY name")
     .all();
-  store.migrate();
+  store.close();
+  stores.splice(stores.indexOf(store), 1);
+  const reopened = open(dir);
   expect(
-    store.db.query("SELECT * FROM sqlite_master ORDER BY name").all(),
+    reopened.db.query("SELECT * FROM sqlite_master ORDER BY name").all(),
   ).toEqual(before);
-  expect(store.db.query("SELECT name FROM apps").all()).toEqual([
+  expect(reopened.db.query("SELECT name FROM apps").all()).toEqual([
     { name: "hello" },
   ]);
-  expect(store.db.query("PRAGMA user_version").get()).toEqual({
+  expect(reopened.db.query("PRAGMA user_version").get()).toEqual({
     user_version: schemaVersion,
   });
+});
+
+test("opening a newer schema fails", () => {
+  const dir = dataDirectory();
+  const store = open(dir);
+  store.db.exec(`PRAGMA user_version = ${schemaVersion + 1}`);
+  store.close();
+  stores.splice(stores.indexOf(store), 1);
+  expect(() => new SqliteStore(dir)).toThrow("newer than hoist");
 });
 
 test("release numbers are isolated by app and branch; snapshots cannot be changed", () => {
@@ -83,5 +99,14 @@ test("release numbers are isolated by app and branch; snapshots cannot be change
   expect(() => store.db.run("UPDATE releases SET config_json = '{}'")).toThrow(
     "immutable",
   );
+  expect(() =>
+    store.db.run("UPDATE releases SET status = 'live'"),
+  ).not.toThrow();
+  expect(() =>
+    store.db.run("UPDATE releases SET container_id = 'abc'"),
+  ).not.toThrow();
+  expect(
+    store.db.query("SELECT DISTINCT status, container_id FROM releases").all(),
+  ).toEqual([{ status: "live", container_id: "abc" }]);
   expect(() => insert.run(99, "main", 1)).toThrow();
 });

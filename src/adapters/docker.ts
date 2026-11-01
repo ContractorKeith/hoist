@@ -13,6 +13,9 @@ export class Docker implements DockerClient {
   private readonly socket: string;
 
   constructor(socket = process.env.DOCKER_HOST ?? "/var/run/docker.sock") {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(socket) && !socket.startsWith("unix://")) {
+      throw new Error("Docker supports only unix sockets (unix://)");
+    }
     this.socket = socket.replace(/^unix:\/\//, "");
     validate.absolutePath(this.socket);
   }
@@ -22,6 +25,7 @@ export class Docker implements DockerClient {
     init: RequestInit = {},
   ): Promise<Response> {
     const response = await fetch(`http://localhost/v1.47${path}`, {
+      signal: AbortSignal.timeout(30000),
       ...init,
       unix: this.socket,
     });
@@ -36,7 +40,10 @@ export class Docker implements DockerClient {
     await this.request("/_ping");
   }
 
-  async buildImage(input: BuildImage): Promise<LogStream> {
+  async buildImage(
+    input: BuildImage,
+    signal?: AbortSignal,
+  ): Promise<LogStream> {
     validate.absolutePath(input.contextDir);
     validate.imageName(input.tag);
     validate.labels(input.labels);
@@ -58,6 +65,7 @@ export class Docker implements DockerClient {
         method: "POST",
         headers: { "Content-Type": "application/x-tar" },
         body: archive.stdout,
+        signal: signal ?? null,
       });
       if ((await archive.exited) !== 0) {
         await response.body?.cancel();
@@ -151,10 +159,15 @@ export class Docker implements DockerClient {
       method: "DELETE",
     });
   }
-  async containerLogs(id: string, follow = false): Promise<LogStream> {
+  async containerLogs(
+    id: string,
+    follow = false,
+    signal?: AbortSignal,
+  ): Promise<LogStream> {
     validate.containerId(id);
     const response = await this.request(
       `/containers/${id}/logs?stdout=true&stderr=true&follow=${follow}`,
+      { signal: signal ?? (follow ? null : AbortSignal.timeout(30000)) },
     );
     if (!response.body) throw new Error("Docker logs response missing body");
     return response.body;

@@ -16,6 +16,7 @@ export class Caddy implements CaddyAdmin {
     init: RequestInit = {},
   ): Promise<Response> {
     const response = await fetch(`${this.base}${path}`, {
+      signal: AbortSignal.timeout(30000),
       ...init,
       headers: { "Content-Type": "application/json", ...init.headers },
     });
