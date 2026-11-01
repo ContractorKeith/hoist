@@ -29,8 +29,10 @@ passwordless sudo are not available. Running `HOIST_E2E=1 bun test test/e2e` wit
 Scratch data: the e2e harness makes its own temp dir under `$TMPDIR` and removes it. Caddy is
 cached at `~/.cache/hoist/caddy/<version>/caddy` (sha256-verified; safe to delete to force a
 re-download). Containers and images the tests make carry the label `hoist.test=<uuid>`.
-Nothing in M0 writes anywhere else. Later milestones add a data dir; its env var will be
-named here when it exists.
+`HOIST_DIR` (default `/var/lib/hoist`) is the data dir: `hoist.db`, `repos/<app>.git`,
+`releases/<app>/<slug>/vN/build.log`, `tmp/` checkouts. Always point it at a scratch dir.
+`HOIST_DOMAIN` is the default base domain. The SSH e2e runs a throwaway `/usr/sbin/sshd` as
+the current user on a random high port with its own host key and `authorized_keys`.
 
 ## Platforms
 
@@ -55,7 +57,15 @@ named here when it exists.
 - **Test honesty**: which acceptance claim has no test; a test that still passes with its
   guard removed; CI green while running nothing (the e2e skip path); a check that passes
   for an environmental reason.
-- **Docs as typed**: every command in `AGENTS.md` from a fresh shell in the worktree.
+- **Push path** (`src/git/dispatch.ts`, `hook.ts`, `repository.ts`, `src/core/build.ts`):
+  `SSH_ORIGINAL_COMMAND` with quoting tricks, `..`, absolute paths, NUL, `git-upload-pack`,
+  internal verbs (`git-hook`, `ssh-dispatch`) sent over SSH; ref lines malformed or oversized;
+  branch names that slugify to the same thing; a push of two branches where one fails; a
+  Dockerfile that fails mid-build; the pusher disconnecting (kill the ssh client); a bare repo
+  with a replaced hook; a tag-only push; the same SHA pushed twice; `apps:destroy` while a
+  build runs; `apps:create` twice concurrently; HOIST_DIR as a symlink or read-only.
+- **Docs as typed**: every command in `AGENTS.md` and the README walkthrough from a fresh
+  shell in the worktree, against a throwaway sshd.
 
 ## Traps
 
@@ -65,9 +75,12 @@ named here when it exists.
 - `Tty: true` on containers is intended (plain log bytes, not multiplex frames); CRLF and
   merged stderr are known and owned by M4.
 - Real adapters have no unit tests by design (PLAN §9); e2e covers them. Core logic is on fakes.
-- `nextReleaseNumber` is a read, not a reservation; the transaction lands in M1.
+- `nextReleaseNumber` is a read; `reserveRelease` wraps it and the insert in one transaction.
+- Image tags are `hoist/<app>:<slug>-v<n>-<sha12>`, unique per release on purpose.
+- Release status after a successful M1 build is `built`, not `live`; cutover is M2.
+- The pre-receive hook hard-codes the executable path; M7 `doctor` rewrites it.
 - `.claude/skills` is a symlink to `.agents/skills`; `CLAUDE.md` is one line (`@AGENTS.md`).
 
 ## Earlier rounds
 
-- none yet
+- 2026-11-01 — PR #9 (M0) at 01536c5: `worklog/reports/hoist-review-2026-11-01.md`; #10–#13.
