@@ -41,6 +41,24 @@ export const migrations = [
     token_hash TEXT PRIMARY KEY NOT NULL,
     expires_at TEXT NOT NULL
   );`,
+  `CREATE TABLE releases_next (
+    id INTEGER PRIMARY KEY,
+    app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    branch TEXT NOT NULL,
+    number INTEGER NOT NULL CHECK (number > 0),
+    git_sha TEXT NOT NULL,
+    image TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('building', 'built', 'live', 'stopped', 'failed')),
+    container_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (app_id, branch, number)
+  );
+  INSERT INTO releases_next SELECT * FROM releases;
+  DROP TABLE releases;
+  ALTER TABLE releases_next RENAME TO releases;
+  CREATE TRIGGER immutable_release_snapshot BEFORE UPDATE OF image, config_json ON releases
+    BEGIN SELECT RAISE(ABORT, 'release snapshots are immutable'); END;`,
 ] as const;
 
 export const schemaVersion = migrations.length;

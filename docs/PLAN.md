@@ -61,7 +61,7 @@ Ubuntu LTS server and in GitHub Actions.
 | 4 | CI: `tsc --noEmit`, Biome, `bun test`, e2e | v1 | M0 | Required check on every PR |
 | 5 | `apps:create`, `apps:list`, `apps:destroy` | v1 | M1 | Explicit create only; destroy prompts |
 | 6 | SSH forced command dispatching `git-receive-pack` and CLI verbs | v1 | M1 | One `authorized_keys` line per key, `command="hoist ssh-dispatch"` |
-| 7 | `pre-receive` builds Dockerfile into `hoist/<app>:<sha>` and streams the log to the pusher | v1 | M1 | Dockerfile only; build log saved per release |
+| 7 | `pre-receive` builds Dockerfile into `hoist/<app>:<slug>-v<number>-<sha12>` and streams the log to the pusher | v1 | M1 | Dockerfile only; build log saved per release |
 | 8 | Release row written on successful build: number, image, sha, branch, config snapshot | v1 | M1 | Immutable; see CONTEXT.md |
 | 9 | Cutover: start new container, health check, swap Caddy upstream, stop old | v1 | M2 | Default `GET /`, 30 s timeout, configurable path |
 | 10 | Caddy supervised by hoist; routes written via admin API; Let's Encrypt on by default | v1 | M2 | Internal CA when `HOIST_TLS=internal` (tests) |
@@ -118,14 +118,14 @@ Rules that hold the shape:
 ```
 apps        id, name (unique), domain, health_path, retention, created_at
 releases    id, app_id, branch, number, git_sha, image, config_json (encrypted), status
-            (building|live|stopped|failed), container_id, created_at
+            (building|built|live|stopped|failed), container_id, created_at
 config      app_id, key, value (encrypted)       -- current config; snapshotted into releases
 previews    app_id, branch, slug, last_push_at    -- current release is the newest live release
                                                    for (app_id, branch)
 sessions    token_hash, expires_at
 ```
 
-`number` is per `(app_id, branch)`. Main-branch releases are `v1, v2, ...`; a preview has its own
+`number` is per `(app_id, branch)`; image tags are `hoist/<app>:<branch-slug>-v<number>-<sha12>`, unique to each release. Main-branch releases are `v1, v2, ...`; a preview has its own
 `v1, v2, ...`. Rollback inserts a new row copying `image` and `config_json` from the target.
 
 ## 7. CLI contract
