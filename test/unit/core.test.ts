@@ -8,7 +8,7 @@ import { nextReleaseNumber } from "../../src/core/releases";
 test("next release number reads only the requested app and branch through the store seam", () => {
   const store = new FakeStore();
   expect(nextReleaseNumber(store, 1, "main")).toBe(1);
-  store.releases.push(
+  store.releasesSeed.push(
     { appId: 1, branch: "main", number: 3 },
     { appId: 1, branch: "feature", number: 8 },
     { appId: 2, branch: "main", number: 9 },

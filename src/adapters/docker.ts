@@ -46,6 +46,8 @@ export class Docker implements DockerClient {
     validate.labels(input.labels);
     if (!(await stat(input.contextDir)).isDirectory())
       throw new Error("Build context must be a directory");
+    const connection = new AbortController();
+    const buildSignal = AbortSignal.any([signal, connection.signal]);
     const archive = Bun.spawn(
       ["tar", "-C", input.contextDir, "-czf", "-", "."],
       { stdout: "pipe", stderr: "pipe" },
@@ -62,7 +64,7 @@ export class Docker implements DockerClient {
         method: "POST",
         headers: { "Content-Type": "application/x-tar" },
         body: archive.stdout,
-        signal,
+        signal: buildSignal,
       });
       if ((await archive.exited) !== 0) {
         await response.body?.cancel();
@@ -79,7 +81,7 @@ export class Docker implements DockerClient {
         if (message.error) throw new Error(`Docker build: ${message.error}`);
       };
       if (!response.body) throw new Error("Docker build response missing body");
-      return response.body.pipeThrough(
+      const checked = response.body.pipeThrough(
         new TransformStream<Uint8Array, Uint8Array>({
           transform(chunk, controller) {
             pending += decoder.decode(chunk, { stream: true });
@@ -96,6 +98,33 @@ export class Docker implements DockerClient {
           },
         }),
       );
+      const reader = checked.getReader();
+      // Own the HTTP connection even when the consumer stops reading mid-build.
+      return new ReadableStream<Uint8Array>(
+        {
+          async pull(controller) {
+            try {
+              const { value, done } = await reader.read();
+              if (done) {
+                reader.releaseLock();
+                controller.close();
+              } else controller.enqueue(value);
+            } catch (error) {
+              connection.abort(error);
+              controller.error(error);
+            }
+          },
+          async cancel(reason) {
+            connection.abort(reason);
+            await reader.cancel(reason).catch(() => {});
+            reader.releaseLock();
+          },
+        },
+        { highWaterMark: 0 },
+      );
+    } catch (error) {
+      connection.abort(error);
+      throw error;
     } finally {
       if (archive.exitCode === null) archive.kill();
       await archive.exited;
@@ -190,7 +219,7 @@ export class Docker implements DockerClient {
   async listImages(labels: Labels): Promise<string[]> {
     validate.labels(labels);
     const filters = new URLSearchParams({
-      all: "true",
+      all: "false",
       filters: JSON.stringify({
         label: Object.entries(labels).map(([key, value]) => `${key}=${value}`),
       }),

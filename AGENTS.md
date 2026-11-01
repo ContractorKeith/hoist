@@ -34,6 +34,8 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 
 ## Conventions & Gotchas
 
+- `HOIST_DIR` (default `/var/lib/hoist`) holds the private database, bare repos, temporary checkouts and release logs; `HOIST_DOMAIN` supplies the default base domain until M7.
+- Bare repos install a tiny executable `pre-receive` hook that execs `hoist git-hook pre-receive <app>`; pushed values never reach a shell.
 - On Omarchy, a shell missing the Docker group must run socket commands via `newgrp docker` on stdin; CI needs no wrapper.
 - `src/core` depends only on the `DockerClient`, `CaddyAdmin` and `Store` interfaces and is
   tested on fakes. Adapters are thin and covered by e2e only.

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Store } from "./interface";
+import { privatePath } from "../data";
+import type { App, Release, Store } from "./interface";
 import { migrations, schemaVersion } from "./migrations";
 
 export class SqliteStore implements Store {
@@ -10,7 +10,8 @@ export class SqliteStore implements Store {
   constructor(dataDir: string) {
     if (!dataDir || dataDir.includes("\0"))
       throw new Error("Invalid data directory");
-    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    privatePath(dataDir);
+    privatePath(join(dataDir, "hoist.db"), false);
     this.db = new Database(join(dataDir, "hoist.db"), {
       create: true,
       strict: true,
@@ -53,6 +54,57 @@ export class SqliteStore implements Store {
         )
         .get(appId, branch)?.number ?? 0
     );
+  }
+
+  transaction<T>(action: () => T): T {
+    return this.db.transaction(action).immediate();
+  }
+  createApp(name: string, domain: string, healthPath: string): App {
+    const row = this.db
+      .query<App, [string, string, string]>(
+        "INSERT INTO apps (name, domain, health_path) VALUES (?, ?, ?) RETURNING *",
+      )
+      .get(name, domain, healthPath);
+    if (!row) throw new Error("App insert failed");
+    return row;
+  }
+  app(name: string): App | null {
+    return this.db
+      .query<App, [string]>("SELECT * FROM apps WHERE name = ?")
+      .get(name);
+  }
+  apps(): App[] {
+    return this.db.query<App, []>("SELECT * FROM apps ORDER BY name").all();
+  }
+  deleteApp(id: number): void {
+    this.db.run("DELETE FROM apps WHERE id = ?", [id]);
+  }
+  releases(appId: number): Release[] {
+    return this.db
+      .query<Release, [number]>(
+        "SELECT * FROM releases WHERE app_id = ? ORDER BY id",
+      )
+      .all(appId);
+  }
+  insertRelease(input: Omit<Release, "id">): Release {
+    const row = this.db
+      .query<Release, [number, string, number, string, string, string, string]>(
+        "INSERT INTO releases (app_id, branch, number, git_sha, image, config_json, status) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+      )
+      .get(
+        input.app_id,
+        input.branch,
+        input.number,
+        input.git_sha,
+        input.image,
+        input.config_json,
+        input.status,
+      );
+    if (!row) throw new Error("Release insert failed");
+    return row;
+  }
+  failRelease(id: number): void {
+    this.db.run("UPDATE releases SET status = 'failed' WHERE id = ?", [id]);
   }
 
   close(): void {

@@ -1,6 +1,6 @@
 import type { Store } from "../store/interface";
 
-// This is a read, not a reservation. M1 must insert under a store transaction.
+// This is a read, not a reservation. Reserve and insert inside one store transaction.
 export function nextReleaseNumber(
   store: Store,
   appId: number,

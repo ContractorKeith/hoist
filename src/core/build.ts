@@ -1,0 +1,90 @@
+import type { DockerClient } from "../adapters/interfaces";
+import type { App, Release, Store } from "../store/interface";
+import { nextReleaseNumber } from "./releases";
+import { branchSlug } from "./validation";
+
+export function reserveRelease(
+  store: Store,
+  app: App,
+  branch: string,
+  sha: string,
+): Release {
+  const slug = branchSlug(branch);
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Invalid git SHA");
+  return store.transaction(() => {
+    if (
+      store
+        .releases(app.id)
+        .some((row) => row.branch !== branch && branchSlug(row.branch) === slug)
+    )
+      throw new Error("Branch slug collides with an existing branch");
+    return store.insertRelease({
+      app_id: app.id,
+      branch,
+      number: nextReleaseNumber(store, app.id, branch),
+      git_sha: sha,
+      image: `hoist/${app.name}:${sha.slice(0, 12)}`,
+      config_json: "{}",
+      status: "building",
+    });
+  });
+}
+
+// The hook supplies a confined checkout and durable log sink; core owns release transitions.
+export async function buildRelease(
+  store: Store,
+  docker: DockerClient,
+  release: Release,
+  app: App,
+  prepare: () => Promise<string>,
+  log: (chunk: Uint8Array) => Promise<void>,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    signal.throwIfAborted();
+    const contextDir = await prepare();
+    const stream = await docker.buildImage(
+      {
+        contextDir,
+        tag: release.image,
+        labels: {
+          "hoist.app": app.name,
+          "hoist.release": String(release.id),
+          "hoist.sha": release.git_sha,
+        },
+      },
+      signal,
+    );
+    const reader = stream.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await log(value);
+      }
+      signal.throwIfAborted();
+    } catch (error) {
+      await reader.cancel(error).catch(() => {});
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+  } catch (error) {
+    store.failRelease(release.id);
+    try {
+      await log(
+        new TextEncoder().encode(
+          `${error instanceof Error ? error.message : String(error)}\n`,
+        ),
+      );
+    } finally {
+      // Remove only this release's image; a reused SHA tag may refer to an older release.
+      for (const image of await docker.listImages({
+        "hoist.app": app.name,
+        "hoist.release": String(release.id),
+      }))
+        await docker.removeImage(image);
+    }
+    throw error;
+  }
+}
