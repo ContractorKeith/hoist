@@ -28,7 +28,12 @@ export interface DockerClient {
   inspectContainer(
     id: string,
     appPort?: number,
-  ): Promise<{ running: boolean; port: number; appPort: number } | null>;
+  ): Promise<{
+    running: boolean;
+    port: number;
+    appPort: number;
+    labels: Labels;
+  } | null>;
   // Consume the stream to finish the build; stream errors fail the build.
   // Cancellation or signal abort closes the connection. The caller owns the deadline;
   // builds have no default timeout.
@@ -57,6 +62,10 @@ export interface CaddyAdmin {
 }
 
 export interface AppLocks {
-  withLock<T>(app: string, action: () => Promise<T>): Promise<T>;
+  withLock<T>(
+    app: string,
+    action: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T>;
   isLocked(app: string): boolean;
 }

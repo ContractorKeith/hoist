@@ -1,6 +1,66 @@
-import type { App, Release, Store } from "../../store/interface";
+import type {
+  App,
+  LockClaim,
+  LockRow,
+  Release,
+  Store,
+} from "../../store/interface";
 
 export class FakeStore implements Store {
+  readonly lockRows = new Map<string, LockRow>();
+  lock(name: string): LockRow | null {
+    return structuredClone(this.lockRows.get(name) ?? null);
+  }
+  acquireLock(
+    name: string,
+    pid: number,
+    now: string,
+    alive: (pid: number) => boolean,
+  ): LockClaim {
+    const previous = this.lock(name);
+    if (
+      previous &&
+      alive(previous.owner_pid) &&
+      Date.parse(previous.heartbeat_at) > Date.parse(now) - 60000
+    )
+      return { acquired: false, ownerPid: previous.owner_pid };
+    this.lockRows.set(name, {
+      name,
+      owner_pid: pid,
+      heartbeat_at: now,
+      acquired_at: now,
+      child_pid: previous?.child_pid ?? null,
+    });
+    return { acquired: true, previous };
+  }
+  refreshLock(
+    name: string,
+    pid: number,
+    acquiredAt: string,
+    now: string,
+  ): boolean {
+    const row = this.lockRows.get(name);
+    if (!row || row.owner_pid !== pid || row.acquired_at !== acquiredAt)
+      return false;
+    row.heartbeat_at = now;
+    return true;
+  }
+  releaseLock(name: string, pid: number, acquiredAt: string): void {
+    const row = this.lockRows.get(name);
+    if (row?.owner_pid === pid && row.acquired_at === acquiredAt)
+      this.lockRows.delete(name);
+  }
+  setLockChild(
+    name: string,
+    pid: number,
+    acquiredAt: string,
+    childPid: number | null,
+  ): void {
+    const row = this.lockRows.get(name);
+    if (!row || row.owner_pid !== pid || row.acquired_at !== acquiredAt)
+      throw new Error(`lock ${name} ownership changed`);
+    row.child_pid = childPid;
+  }
   readonly calls: { appId: number; branch: string }[] = [];
   readonly rows: Release[] = [];
   readonly appRows: App[] = [];

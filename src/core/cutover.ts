@@ -1,4 +1,4 @@
-import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
+import type { CaddyAdmin, DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
 import { healthPath } from "./validation";
 
@@ -14,6 +14,18 @@ export function appPort(
   if (!port || !Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("Invalid app port");
   return port;
+}
+
+export function ownsContainer(
+  container: { labels: Labels } | null,
+  app: App,
+  release: Release,
+): boolean {
+  return (
+    !!container &&
+    container.labels["hoist.app"] === app.name &&
+    container.labels["hoist.release"] === String(release.id)
+  );
 }
 
 async function startHealthy(
@@ -43,7 +55,8 @@ async function startHealthy(
     });
     await docker.startContainer(id);
     const container = await docker.inspectContainer(id, port);
-    if (!container?.running) throw new Error("New container is not running");
+    if (!container?.running || !ownsContainer(container, app, release))
+      throw new Error("New container is not running");
     await log(`Health check GET ${app.health_path}`);
     await health(container.port, app.health_path);
     await log("Swapping Caddy upstream");
@@ -121,10 +134,17 @@ export async function recoverLive(
   app: App,
   release: Release,
   health: HealthCheck,
+  report: (message: string) => void = console.error,
 ): Promise<void> {
   if (release.status !== "live")
     throw new Error("Recovery requires a live release");
   const oldId = release.container_id;
+  const old = oldId ? await docker.inspectContainer(oldId) : null;
+  const owned = ownsContainer(old, app, release);
+  if (old && !owned)
+    report(
+      `${app.name} release ${release.id}: container ${oldId} ownership does not match; recovering`,
+    );
   const id = await startHealthy(
     docker,
     caddy,
@@ -135,6 +155,6 @@ export async function recoverLive(
   );
   store.setReleaseState(release.id, "live", id, "live");
   // Recovery never stops the old container: it was missing or stopped already.
-  if (oldId && oldId !== id && (await docker.inspectContainer(oldId)))
+  if (oldId && oldId !== id && old && owned)
     await docker.removeContainer(oldId);
 }

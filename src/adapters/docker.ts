@@ -157,7 +157,12 @@ export class Docker implements DockerClient {
   async inspectContainer(
     id: string,
     appPort?: number,
-  ): Promise<{ running: boolean; port: number; appPort: number } | null> {
+  ): Promise<{
+    running: boolean;
+    port: number;
+    appPort: number;
+    labels: Labels;
+  } | null> {
     validate.containerId(id);
     let response: Response;
     try {
@@ -169,6 +174,7 @@ export class Docker implements DockerClient {
     }
     const row = (await response.json()) as {
       State: { Running: boolean };
+      Config: { Labels?: Labels };
       HostConfig: {
         PortBindings?: Record<
           string,
@@ -196,7 +202,9 @@ export class Docker implements DockerClient {
     );
     const port = Number(binding?.HostPort ?? 0);
     if (row.State.Running) validate.port(port);
-    return { running: row.State.Running, port, appPort: selected };
+    const labels = row.Config.Labels ?? {};
+    validate.labels(labels);
+    return { running: row.State.Running, port, appPort: selected, labels };
   }
 
   async createContainer(input: ContainerSpec): Promise<string> {

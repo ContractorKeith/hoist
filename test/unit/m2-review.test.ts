@@ -56,46 +56,6 @@ test("destroy succeeds with Caddy down after deleting local resources", async ()
   expect(store.apps()).toEqual([]);
 });
 
-test("two file lock holders serialize and a dead pid is reclaimed", async () => {
-  const { FileAppLocks } = await import("../../src/adapters/app-lock");
-  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
-  const { tmpdir } = await import("node:os"),
-    { join } = await import("node:path");
-  const root = await mkdtemp(join(tmpdir(), "hoist-lock-"));
-  try {
-    const locks = new FileAppLocks(root),
-      order: string[] = [];
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const first = locks.withLock("hello", async () => {
-      order.push("first");
-      await gate;
-      order.push("released");
-    });
-    const second = locks.withLock("hello", async () => {
-      order.push("second");
-    });
-    await Bun.sleep(220);
-    expect(order).toEqual(["first"]);
-    release();
-    await Promise.all([first, second]);
-    expect(order).toEqual(["first", "released", "second"]);
-    expect(locks.isLocked("hello")).toBe(false);
-    await mkdir(join(root, "locks"), { recursive: true });
-    const dead = Bun.spawn(["true"]);
-    await dead.exited;
-    await writeFile(join(root, "locks/hello.lock"), String(dead.pid));
-    await locks.withLock("hello", async () => {
-      expect(locks.isLocked("hello")).toBe(true);
-    });
-    expect(locks.isLocked("hello")).toBe(false);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 test("SQLite status writes use compare-and-swap including recovery", async () => {
   const { SqliteStore } = await import("../../src/store/sqlite");
   const { mkdtemp, rm } = await import("node:fs/promises");
@@ -192,13 +152,6 @@ test("reconcile isolates failed recovery and preserves in-flight release contain
     docker,
     caddy,
     {
-      dataDir: "/private",
-      tls: "internal",
-      adminPort: 2019,
-      httpPort: 80,
-      httpsPort: 443,
-    },
-    {
       withLock: async (name, action) => {
         acquired.push(name);
         return action();
@@ -214,7 +167,8 @@ test("reconcile isolates failed recovery and preserves in-flight release contain
   expect(errors).toHaveLength(1);
   expect(acquired).toEqual(["bad", "good"]);
   expect(caddy.routes.has("good.test")).toBe(true);
-  expect(docker.containers.has(candidate)).toBe(true);
+  expect(docker.containers.has(candidate)).toBe(false);
+  expect(pending.status).toBe("failed");
   expect(docker.containers.has(locked)).toBe(true);
 });
 

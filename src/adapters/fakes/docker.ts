@@ -20,12 +20,18 @@ export class FakeDocker implements DockerClient {
   async inspectContainer(
     id: string,
     appPort = 8080,
-  ): Promise<{ running: boolean; port: number; appPort: number } | null> {
+  ): Promise<{
+    running: boolean;
+    port: number;
+    appPort: number;
+    labels: Labels;
+  } | null> {
     this.record("inspectContainer", id);
     return this.containers.has(id)
       ? {
           running: this.running.has(id),
           appPort,
+          labels: structuredClone(this.containers.get(id)?.labels ?? {}),
           port: 30000 + Number.parseInt(id.slice(-4), 16),
         }
       : null;

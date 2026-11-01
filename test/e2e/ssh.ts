@@ -97,6 +97,7 @@ async function startSSH(executable?: string) {
     server: ReturnType<typeof Bun.spawn> | undefined;
   let logs = "",
     serverLogs: Promise<void> | undefined;
+  const appNames = new Set(["hello"]);
   let leaseReleased = false;
   let store: SqliteStore | undefined;
   const stopServe = async () => {
@@ -123,23 +124,24 @@ async function startSSH(executable?: string) {
       await sshd.exited;
     }
     if (!leaseReleased) await lease.release();
-    await attempt(async () => {
-      for (const container of await docker.listContainers({
-        "hoist.app": "hello",
-      }))
-        await docker.removeContainer(container.id);
-    });
-    await attempt(async () => {
-      await removeImages(docker, { "hoist.app": "hello" });
-    });
+    for (const name of appNames) {
+      await attempt(async () => {
+        for (const container of await docker.listContainers({
+          "hoist.app": name,
+        }))
+          await docker.removeContainer(container.id);
+      });
+      await attempt(() => removeImages(docker, { "hoist.app": name }));
+    }
     for (const port of lease.ports)
       await attempt(async () => {
         expect(await listening(port)).toBe(false);
       });
-    await attempt(async () => {
-      expect(await docker.listContainers({ "hoist.app": "hello" })).toEqual([]);
-      expect(await docker.listImages({ "hoist.app": "hello" })).toEqual([]);
-    });
+    for (const name of appNames)
+      await attempt(async () => {
+        expect(await docker.listContainers({ "hoist.app": name })).toEqual([]);
+        expect(await docker.listImages({ "hoist.app": name })).toEqual([]);
+      });
     store?.close();
     await rm(root, { recursive: true, force: true });
     expect(await stat(root).catch(() => null)).toBeNull();
@@ -194,7 +196,7 @@ async function startSSH(executable?: string) {
       stdout: "ignore",
       stderr: "ignore",
     });
-    const startServe = async () => {
+    const launchServe = () => {
       server = Bun.spawn([...entry, "serve"], {
         env,
         stdout: "ignore",
@@ -210,11 +212,24 @@ async function startSSH(executable?: string) {
           if (text.includes("hoist serve ready")) ready = true;
         }
       })();
+      return { child, ready: () => ready };
+    };
+    const startServe = async () => {
+      const launched = launchServe();
       await eventually(async () => {
-        if (child.exitCode !== null) throw new Error(`serve exited\n${logs}`);
-        expect(ready).toBe(true);
+        if (launched.child.exitCode !== null)
+          throw new Error(`serve exited\n${logs}`);
+        expect(launched.ready()).toBe(true);
       }, 30000);
-      return child;
+      return launched.child;
+    };
+    const killServe = async () => {
+      if (server) {
+        server.kill("SIGKILL");
+        await server.exited;
+        await serverLogs;
+        server = undefined;
+      }
     };
     await startServe();
     await eventually(async () => {
@@ -236,8 +251,10 @@ async function startSSH(executable?: string) {
       String(sshPort),
     ];
     const remote = `${userInfo().username}@127.0.0.1`;
-    const control = (...args: string[]) =>
-      ok([...ssh, remote, "hoist", ...args]);
+    const control = (...args: string[]) => {
+      if (args[0] === "apps:create" && args[1]) appNames.add(args[1]);
+      return ok([...ssh, remote, "hoist", ...args]);
+    };
     await cp(resolve(import.meta.dir, "../fixtures/hello"), source, {
       recursive: true,
     });
@@ -274,14 +291,14 @@ async function startSSH(executable?: string) {
     };
     const push = () =>
       command(["git", "push", "hoist", "main"], { cwd: source, env: pushEnv });
-    const request = async () => {
+    const request = async (host = "hello.example.test") => {
       const ca = await readFile(
         join(data, "caddy/pki/authorities/local/root.crt"),
         "utf8",
       );
       return fetch(`https://127.0.0.1:${https}/`, {
-        headers: { Host: "hello.example.test" },
-        tls: { ca, serverName: "hello.example.test" },
+        headers: { Host: host },
+        tls: { ca, serverName: host },
         signal: AbortSignal.timeout(2000),
       });
     };
@@ -304,6 +321,9 @@ async function startSSH(executable?: string) {
       commit,
       request,
       startServe,
+      launchServe,
+      killServe,
+      getLogs: () => logs,
       stopServe,
       cleanup,
       getServer: () => server,

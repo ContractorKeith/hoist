@@ -1,9 +1,10 @@
 import { join } from "node:path";
-import { FileAppLocks } from "./adapters/app-lock";
+import { SqliteAppLocks } from "./adapters/app-lock";
 import { Caddy } from "./adapters/caddy";
 import { ensureCaddy } from "./adapters/caddy-binary";
 import { Docker } from "./adapters/docker";
 import { checkHealth } from "./adapters/health";
+import { stopOrphanCaddy } from "./adapters/orphan-caddy";
 import { stopChild } from "./adapters/process";
 import { hostName, port } from "./adapters/validation";
 import {
@@ -12,6 +13,7 @@ import {
   newestRoutes,
   type ReleaseRoute,
 } from "./core/caddy-config";
+import { ownsContainer } from "./core/cutover";
 import { reconcile } from "./core/reconcile";
 import { dataRoot, privatePath } from "./data";
 import { SqliteStore } from "./store/sqlite";
@@ -49,19 +51,27 @@ export async function serve(): Promise<void> {
   const store = new SqliteStore(root),
     docker = new Docker(),
     caddy = new Caddy(settings.adminPort);
-  const locks = new FileAppLocks(root);
+  const locks = new SqliteAppLocks(store);
+  const shutdown = new AbortController();
+  let lease: Awaited<ReturnType<SqliteAppLocks["acquire"]>> | undefined;
   let stopping = false;
   let stoppingChild: Promise<void> | undefined;
   let child: ReturnType<typeof Bun.spawn> | undefined;
   let wake: (() => void) | undefined;
   const stop = () => {
     stopping = true;
+    shutdown.abort(new Error("hoist serve stopping"));
     if (child) stoppingChild ??= stopChild(child);
     wake?.();
   };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   try {
+    lease = await locks.acquire("serve", {
+      failFast: true,
+      signal: shutdown.signal,
+    });
+    shutdown.signal.throwIfAborted();
     await docker.ping();
     const binary = await ensureCaddy();
     const configPath = privatePath(
@@ -71,6 +81,8 @@ export async function serve(): Promise<void> {
       root,
     );
     privatePath(join(root, "caddy"), true, false, root);
+    await stopOrphanCaddy(lease.previousChildPid, binary, configPath);
+    lease.setChild(null);
     let backoff = 100;
     let boot = true;
     let fastExits = 0;
@@ -87,7 +99,7 @@ export async function serve(): Promise<void> {
               const info = release.container_id
                 ? await docker.inspectContainer(release.container_id)
                 : null;
-              if (info?.running)
+              if (info?.running && ownsContainer(info, app, release))
                 routes.push({
                   host: app.domain,
                   upstream: `127.0.0.1:${info.port}`,
@@ -113,6 +125,7 @@ export async function serve(): Promise<void> {
         stdout: "inherit",
         stderr: "pipe",
       });
+      lease.setChild(child.pid);
       const current = child;
       const tail: string[] = [];
       const stderrDone = (async () => {
@@ -157,17 +170,19 @@ export async function serve(): Promise<void> {
             store,
             docker,
             caddy,
-            settings,
             locks,
             checkHealth,
             startedAt,
+            console.error,
+            shutdown.signal,
           );
           boot = false;
         }
-        console.error("hoist serve ready");
+        if (!stopping) console.error("hoist serve ready");
       }
       if (!ready && child.exitCode === null) await stopChild(child);
       const code = await child.exited;
+      lease.setChild(null);
       await stderrDone;
       if (stoppingChild) await stoppingChild;
       stoppingChild = undefined;
@@ -193,8 +208,14 @@ export async function serve(): Promise<void> {
         backoff = Math.min(backoff * 2, 5000);
       }
     }
+  } catch (error) {
+    if (!stopping) throw error;
   } finally {
-    if (child) await (stoppingChild ?? stopChild(child));
+    if (child) {
+      await (stoppingChild ?? stopChild(child));
+      lease?.setChild(null);
+    }
+    lease?.release();
     process.off("SIGTERM", stop);
     process.off("SIGINT", stop);
     store.close();

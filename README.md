@@ -26,6 +26,12 @@ Tests and unprivileged local runs can set `HOIST_HTTP_PORT`, `HOIST_HTTPS_PORT` 
 can reach `serve`. HTTPS URLs printed by the hook use the public default port; append
 `:<HOIST_HTTPS_PORT>` when testing on a high port.
 
+Run exactly one `hoist serve` per `HOIST_DIR`; a second supervisor fails immediately
+with the current owner's PID. SQLite leases heartbeat every 10 seconds and expire after
+60 seconds without a heartbeat, or immediately when the owner PID is dead. After a
+SIGKILL/crash, the next supervisor reaps the recorded Caddy child only if its pinned
+binary and config path belong to this data directory, then starts one replacement.
+
 On startup, hoist fails interrupted `building` releases and removes their images,
 restores missing or stopped live containers, rebuilds routes and removes unreferenced
 app containers. It restarts Caddy with backoff if Caddy exits. Five consecutive exits in under 10 seconds
@@ -66,9 +72,14 @@ ssh hoist@server hoist apps:info hello --json
 ```
 
 The push ends with `Live: https://hello.example.com`; opening that URL returns your app.
-A per-app PID lock at `$HOIST_DIR/locks/<app>.lock` serializes reserve, build and cutover
-and that app’s boot reconcile. A second holder polls every 200 ms for up to 10 minutes;
-a dead holder’s lock is reclaimed. Other apps can proceed independently.
+Per-app leases in the SQLite `locks` table serialize reserve, build and cutover with
+that app's reconcile. A second holder polls every 200 ms for up to 10 minutes; shutdown
+cancels a waiting lease immediately. Other apps can proceed independently. Reconcile
+writes each app's route under its lease and never replays a full route snapshot. Caddy
+loads a full config only at spawn; a Caddy restart during a push can fail that push's
+route write, which fails the release and removes its candidate. Containers must match
+both app and release labels. Candidates left by a killed hook are removed and their
+`built` release is failed as "interrupted before cutover".
 Closing the terminal mid-push does not cancel the deploy; the release still lands server-side.
 
 The push streams Docker's build records and saves the same bytes to

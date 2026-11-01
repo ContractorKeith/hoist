@@ -124,6 +124,7 @@ config      app_id, key, value (encrypted)       -- current config; snapshotted 
 previews    app_id, branch, slug, last_push_at    -- current release is the newest live release
                                                    for (app_id, branch)
 sessions    token_hash, expires_at
+locks       name (primary key), owner_pid, heartbeat_at, acquired_at, child_pid (nullable)
 ```
 
 `number` is per `(app_id, branch)`; image tags are `hoist/<app>:<branch-slug>-v<number>-<sha12>`, unique to each release. Main-branch releases are `v1, v2, ...`; a preview has its own

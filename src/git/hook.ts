@@ -1,6 +1,6 @@
 import { open } from "node:fs/promises";
 import { join } from "node:path";
-import { FileAppLocks } from "../adapters/app-lock";
+import { SqliteAppLocks } from "../adapters/app-lock";
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
 import {
   buildRelease,
@@ -48,8 +48,12 @@ export async function receive(
   ...args: Parameters<typeof receiveLocked>
 ): Promise<void> {
   if (!parseRefs(args[4]).length) return receiveLocked(...args);
-  const [root, , , app] = args;
-  await new FileAppLocks(root).withLock(app.name, () => receiveLocked(...args));
+  const [, store, , app, , signal] = args;
+  await new SqliteAppLocks(store).withLock(
+    app.name,
+    () => receiveLocked(...args),
+    signal,
+  );
 }
 
 async function receiveLocked(

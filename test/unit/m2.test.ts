@@ -216,21 +216,14 @@ test("reconcile fails stale building releases, removes images, restores missing 
     port: 8080,
     publishPort: "",
   });
-  await reconcile(
-    store,
-    docker,
-    caddy,
-    settings,
-    new FakeAppLocks(),
-    async () => {},
-  );
+  await reconcile(store, docker, caddy, new FakeAppLocks(), async () => {});
   expect(stale.status).toBe("failed");
   expect(docker.images.size).toBe(0);
   expect(release.status).toBe("live");
   expect(release.container_id).not.toBe("f".repeat(64));
   expect(docker.containers.has(orphan)).toBe(false);
   expect(docker.containers.size).toBe(1);
-  expect(caddy.calls.at(-1)?.method).toBe("loadConfig");
+  expect(caddy.calls.some((call) => call.method === "loadConfig")).toBe(false);
 });
 
 test("reconcile keeps a running live container and replaces a stopped one without stopping the live row", async () => {
@@ -238,27 +231,13 @@ test("reconcile keeps a running live container and replaces a stopped one withou
   await run();
   const id = release.container_id ?? "";
   docker.calls.length = 0;
-  await reconcile(
-    store,
-    docker,
-    caddy,
-    settings,
-    new FakeAppLocks(),
-    async () => {},
-  );
+  await reconcile(store, docker, caddy, new FakeAppLocks(), async () => {});
   expect(docker.calls.some((call) => call.method === "createContainer")).toBe(
     false,
   );
   expect(release.container_id).toBe(id);
   await docker.stopContainer(id);
-  await reconcile(
-    store,
-    docker,
-    caddy,
-    settings,
-    new FakeAppLocks(),
-    async () => {},
-  );
+  await reconcile(store, docker, caddy, new FakeAppLocks(), async () => {});
   expect(release.container_id).not.toBe(id);
   expect(docker.containers.has(id)).toBe(false);
 });
@@ -289,7 +268,6 @@ test("reconcile preserves builds created after process start", async () => {
     store,
     docker,
     caddy,
-    settings,
     new FakeAppLocks(),
     async () => {},
     "2026-11-01T00:00:00.000Z",
@@ -304,7 +282,6 @@ test("failed boot recovery preserves the live row for a retry and removes its ca
     store,
     docker,
     caddy,
-    settings,
     new FakeAppLocks(),
     async () => {
       throw new Error("HTTP 500");
@@ -313,7 +290,7 @@ test("failed boot recovery preserves the live row for a retry and removes its ca
   expect(errors.join("\n")).toContain("HTTP 500");
   expect(release.status).toBe("live");
   expect(docker.containers.size).toBe(0);
-  expect(caddy.calls.at(-1)?.method).toBe("loadConfig");
+  expect(caddy.calls.some((call) => call.method === "loadConfig")).toBe(false);
 });
 
 test("destroy removes all remaining labelled images", async () => {
