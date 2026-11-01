@@ -23,7 +23,10 @@ scenario(
           docker.listContainers({ "bad/label": "value" }),
         ).rejects.toThrow("label");
         await expect(
-          docker.buildImage({ contextDir: "/tmp/../etc", tag, labels }),
+          docker.buildImage(
+            { contextDir: "/tmp/../etc", tag, labels },
+            AbortSignal.timeout(120_000),
+          ),
         ).rejects.toThrow("path");
         await expect(
           docker.createContainer({
@@ -40,11 +43,14 @@ scenario(
         expect(() => new Docker("tcp://127.0.0.1:2375")).toThrow(
           "only unix sockets",
         );
-        const logs = await docker.buildImage({
-          contextDir: resolve("test/fixtures/hello"),
-          tag,
-          labels,
-        });
+        const logs = await docker.buildImage(
+          {
+            contextDir: resolve(import.meta.dir, "../fixtures/hello"),
+            tag,
+            labels,
+          },
+          AbortSignal.timeout(120_000),
+        );
         const buildLog = await new Response(logs).text();
         expect(buildLog.length).toBeGreaterThan(0);
         expect(await docker.listImages(labels)).toHaveLength(1);

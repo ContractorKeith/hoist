@@ -7,6 +7,7 @@ import { ensureCaddy } from "../../src/adapters/caddy-binary";
 import { Docker } from "../../src/adapters/docker";
 import type { CaddyConfig } from "../../src/adapters/interfaces";
 import { SqliteStore } from "../../src/store/sqlite";
+import { caddyLogs } from "./caddy-logs";
 
 export async function highPort(): Promise<number> {
   const server = createServer();
@@ -159,7 +160,7 @@ export async function withHarness(
       process.kill("SIGTERM");
       await Promise.race([process.exited, Bun.sleep(3000)]);
       if (process.exitCode === null) process.kill("SIGKILL");
-      await process.exited;
+      await Promise.race([process.exited, Bun.sleep(2000)]);
     }
     for (const port of caddyPorts) await attempt(() => assertPortClosed(port));
     await attempt(async () => {
@@ -184,6 +185,6 @@ export async function withHarness(
   if (failures.length)
     throw new AggregateError(
       failures,
-      `Harness failed\n${(await childLogs) ?? ""}`,
+      `Harness failed\n${await caddyLogs(child, childLogs)}`,
     );
 }

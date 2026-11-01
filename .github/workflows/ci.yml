@@ -22,5 +22,11 @@ jobs:
       - run: bun run typecheck
       - run: bun run lint
       - run: bun test
-      - run: bun run test:e2e
+      - name: Verify e2e ran and teardown succeeded
+        shell: bash
+        run: |
+          set -o pipefail
+          bun run test:e2e 2>&1 | tee /tmp/hoist-e2e.log
+          grep -F ' 1 pass' /tmp/hoist-e2e.log
+          grep -F 'Teardown verified' /tmp/hoist-e2e.log
       - run: bun run build && ./dist/hoist version

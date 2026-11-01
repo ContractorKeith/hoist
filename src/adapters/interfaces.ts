@@ -25,11 +25,13 @@ export interface Container {
 export interface DockerClient {
   ping(): Promise<void>;
   // Consume the stream to finish the build; stream errors fail the build.
-  buildImage(input: BuildImage, signal?: AbortSignal): Promise<LogStream>;
+  // The caller owns the deadline through signal; builds have no default timeout.
+  buildImage(input: BuildImage, signal: AbortSignal): Promise<LogStream>;
   createContainer(input: ContainerSpec): Promise<string>;
   startContainer(id: string): Promise<void>;
   stopContainer(id: string): Promise<void>;
   removeContainer(id: string): Promise<void>;
+  // Follow streams have no default timeout; the caller owns cancellation/deadlines via signal.
   containerLogs(
     id: string,
     follow?: boolean,

@@ -24,10 +24,7 @@ export class FakeDocker implements DockerClient {
   async ping(): Promise<void> {
     this.record("ping");
   }
-  async buildImage(
-    input: BuildImage,
-    signal?: AbortSignal,
-  ): Promise<LogStream> {
+  async buildImage(input: BuildImage, signal: AbortSignal): Promise<LogStream> {
     this.record("buildImage", input, signal);
     this.images.set(input.tag, structuredClone(input.labels));
     return new Blob(["built\n"]).stream();

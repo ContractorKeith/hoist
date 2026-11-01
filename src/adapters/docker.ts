@@ -40,10 +40,7 @@ export class Docker implements DockerClient {
     await this.request("/_ping");
   }
 
-  async buildImage(
-    input: BuildImage,
-    signal?: AbortSignal,
-  ): Promise<LogStream> {
+  async buildImage(input: BuildImage, signal: AbortSignal): Promise<LogStream> {
     validate.absolutePath(input.contextDir);
     validate.imageName(input.tag);
     validate.labels(input.labels);
@@ -65,7 +62,7 @@ export class Docker implements DockerClient {
         method: "POST",
         headers: { "Content-Type": "application/x-tar" },
         body: archive.stdout,
-        signal: signal ?? null,
+        signal,
       });
       if ((await archive.exited) !== 0) {
         await response.body?.cancel();

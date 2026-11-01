@@ -40,7 +40,8 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - Everything from a pushed repo is untrusted: slugify branch names, validate health paths,
   clamp sizes before Docker, Caddy or the filesystem see them.
 - One process. Caddy is a supervised child; the preview sweeper is a timer. No queue.
-- Release rows are immutable. Rollback inserts; it never updates `image` or `config_json`.
+- A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
+  change during cutover. Delete is governed by retention (M3).
 - Dashboard is read-mostly: rollback and restart are its only actions. Everything else is CLI.
 - Tooling is Bun, `tsc --noEmit`, Biome. No ESLint, Prettier, Vitest, or ORM.
 - One milestone = one issue = one branch = one PR = one T3 thread in its own worktree. M0 lands
