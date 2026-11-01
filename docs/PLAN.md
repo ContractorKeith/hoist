@@ -108,6 +108,8 @@ Rules that hold the shape:
   covered only by e2e.
 - One process. Caddy is a child process supervised by `server.ts`; the sweeper is a timer. No
   queue, no worker pool.
+- Caddy runs on the host, so containers publish their app port to a loopback-only host port and
+  Caddy dials `127.0.0.1:<port>`. Nothing is published on a non-loopback interface.
 - Every value from a pushed repo (branch name, Dockerfile output, health path) is untrusted.
   Slugify, clamp and validate before it reaches Docker, Caddy or a filename.
 
