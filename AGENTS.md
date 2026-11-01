@@ -10,7 +10,7 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 
 ## Status
 
-M0 in progress — harness, schema, adapter seams and CI. Draft PR: [#9](https://github.com/ContractorKeith/hoist/pull/9).
+M0 done — 2026-11-01 (#9): Bun toolchain, SQLite schema and migrations, Docker/Caddy adapter seams with fakes, real Docker + pinned Caddy e2e harness, CI. M1 (apps, SSH dispatch, Dockerfile build, release row) in progress.
 
 ## Commands
 
