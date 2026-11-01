@@ -9,21 +9,23 @@ Dokku. "Done" for v1 is every row marked v1 in `docs/PLAN.md` §4 passing the ac
 in §10 on a fresh Ubuntu server and in GitHub Actions.
 
 ## Status
-Planned — 2026-11-01: grill done, plan, glossary, two ADRs and eight milestone issues written.
-No code yet. M0 (harness, schema, adapter seams, CI) is next and lands alone.
+
+M0 in progress — harness, schema, adapter seams and CI. Draft PR: pending creation.
 
 ## Commands
+
 ```bash
 bun install
 bun run typecheck          # tsc --noEmit
 bun run lint               # biome check .
-bun test                   # unit, no Docker needed
-bun test test/e2e          # real Docker + Caddy on a high port
-bun run build              # bun build --compile -> dist/hoist
+bun run test               # bun test (unit; no Docker)
+bun run test:e2e           # bun test test/e2e (real Docker + Caddy)
+bun run build              # bun build --compile src/cli/index.ts --outfile dist/hoist
 ```
-(Scripts land in M0; keep this block in step with `package.json`.)
+Bare `bun test` skips the e2e scenario; an explicit `test/e2e` argument enables it.
 
 ## Pointers
+
 - `docs/PLAN.md` — problem, feature matrix, architecture, data model, CLI contract,
   milestones, testing, acceptance.
 - `CONTEXT.md` — glossary. Use its words in code, issues and PRs.
@@ -31,6 +33,8 @@ bun run build              # bun build --compile -> dist/hoist
 - Session logs: `~/Projects/worklog/projects/hoist.md` (not in this repo).
 
 ## Conventions & Gotchas
+
+- On Omarchy, a shell missing the Docker group must run socket commands via `newgrp docker` on stdin; CI needs no wrapper.
 - `src/core` depends only on the `DockerClient`, `CaddyAdmin` and `Store` interfaces and is
   tested on fakes. Adapters are thin and covered by e2e only.
 - Everything from a pushed repo is untrusted: slugify branch names, validate health paths,
@@ -46,12 +50,14 @@ bun run build              # bun build --compile -> dist/hoist
 - Commits: `<type>: <description>`, author @ContractorKeith only.
 
 ## Tracking
+
 - GitHub issues are the tickets, one per milestone, label `milestone`.
 - Basecamp project "github" (card table) has one card per milestone titled `hoist Mn: ...`
   linking the issue and the PLAN section. Move the card to In progress when the branch opens
   and to Done when the PR merges. Do not create per-issue cards.
 
 ## Out of Scope
+
 - Multi-node, agents, gRPC, template marketplace, MCP server. Never.
 - Buildpacks or framework presets, webhooks, one-click databases, API tokens, multiple users.
   After v1, if real demand shows.
