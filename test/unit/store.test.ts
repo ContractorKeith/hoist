@@ -1,8 +1,9 @@
+import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { schemaVersion } from "../../src/store/migrations";
+import { migrations, schemaVersion } from "../../src/store/migrations";
 import { SqliteStore } from "../../src/store/sqlite";
 
 const dirs: string[] = [];
@@ -109,4 +110,30 @@ test("release numbers are isolated by app and branch; snapshots cannot be change
     store.db.query("SELECT DISTINCT status, container_id FROM releases").all(),
   ).toEqual([{ status: "live", container_id: "abc" }]);
   expect(() => insert.run(99, "main", 1)).toThrow();
+});
+
+test("migration 2 preserves M0 releases, adds built and keeps immutable snapshots and cascade", () => {
+  const dir = dataDirectory();
+  // Create the exact M0 schema before opening the current store.
+  mkdirSync(dir, { recursive: true });
+  const legacy = new Database(join(dir, "hoist.db"), { create: true });
+  legacy.exec(migrations[0]);
+  legacy.exec(
+    "PRAGMA user_version = 1; INSERT INTO apps (id, name, domain) VALUES (1, 'hello', 'hello.test'); INSERT INTO releases (app_id, branch, number, git_sha, image, config_json, status) VALUES (1, 'main', 1, 'abc', 'hoist/hello:abc', '{}', 'building');",
+  );
+  const before = legacy.query("SELECT * FROM releases").all();
+  legacy.close();
+  const store = open(dir);
+  expect(store.db.query("SELECT * FROM releases").all()).toEqual(before);
+  store.completeRelease(1);
+  expect(store.releases(1)[0]?.status).toBe("built");
+  expect(() => store.db.run("UPDATE releases SET status = 'bogus'")).toThrow();
+  expect(() => store.db.run("UPDATE releases SET image = 'changed'")).toThrow(
+    "immutable",
+  );
+  expect(() =>
+    store.db.run("UPDATE releases SET config_json = 'changed'"),
+  ).toThrow("immutable");
+  store.deleteApp(1);
+  expect(store.releases(1)).toEqual([]);
 });

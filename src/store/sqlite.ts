@@ -103,6 +103,9 @@ export class SqliteStore implements Store {
     if (!row) throw new Error("Release insert failed");
     return row;
   }
+  completeRelease(id: number): void {
+    this.db.run("UPDATE releases SET status = 'built' WHERE id = ?", [id]);
+  }
   failRelease(id: number): void {
     this.db.run("UPDATE releases SET status = 'failed' WHERE id = ?", [id]);
   }

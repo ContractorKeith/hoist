@@ -189,8 +189,13 @@ scenario(
       if (!release) throw new Error("Missing release");
       expect(release.number).toBe(1);
       expect(release.git_sha).toBe(sha);
-      expect(release.image).toBe(`hoist/hello:${sha.slice(0, 12)}`);
-      expect(release.status).toBe("building");
+      expect(release.image).toBe(`hoist/hello:main-v1-${sha.slice(0, 12)}`);
+      expect(release.status).toBe("built");
+      const info = JSON.parse(
+        (await control("apps:info", "hello", "--json")).stdout,
+      );
+      expect(info.releases).toHaveLength(1);
+      expect(info.releases[0]).toMatchObject({ number: 1, status: "built" });
       expect(release.config_json).toBe("{}");
       const log = await readFile(
         join(data, "releases/hello/main/v1/build.log"),
@@ -250,6 +255,9 @@ scenario(
         (await command([...ssh, remote, "apps:destroy hello"])).output,
       ).toContain("requires --force");
       await control("apps:destroy", "hello", "--force");
+      expect(JSON.parse((await control("apps:list", "--json")).stdout)).toEqual(
+        [],
+      );
       expect(store.apps()).toEqual([]);
       expect(store.releases(app.id)).toEqual([]);
       for (const path of ["repos/hello.git", "releases/hello"])
@@ -257,7 +265,7 @@ scenario(
       expect(await docker.listImages({ "hoist.app": "hello" })).toEqual([]);
       expect(await readdir(join(data, "tmp"))).toEqual([]);
       console.log(
-        "README walkthrough verified: ssh … hoist apps:create hello; git remote add hoist ssh://…/hello.git; git push hoist main -> release v1, building; apps:destroy hello --force -> empty.",
+        "README walkthrough verified: ssh … hoist apps:create hello; git remote add hoist ssh://…/hello.git; git push hoist main -> release v1, built; apps:destroy hello --force -> empty.",
       );
     } catch (error) {
       failures.push(error);
@@ -300,7 +308,7 @@ scenario(
 );
 
 scenario(
-  "Docker build cancellation returns file descriptors to baseline after five builds",
+  "cancelled or aborted build streams return fds to baseline",
   async () => {
     if (process.platform !== "linux") throw new Error("E2e requires Linux");
     const docker = new Docker();

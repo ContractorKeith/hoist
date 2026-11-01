@@ -4,7 +4,7 @@ A lightweight self-hosted PaaS for one Linux server. One Bun executable, Docker 
 and a pinned Caddy binary. MIT. See [the plan](docs/PLAN.md) for the v1 scope.
 
 M0 is complete. M1 builds Dockerfile images on push and records numbered releases. Releases
-remain `building` until M2 adds cutover. No app container is started and no HTTPS URL is
+move from `building` to `built` on success; M2 adds cutover. No app container is started and no HTTPS URL is
 served yet.
 
 ## Push an app (M1)
@@ -20,6 +20,9 @@ with this prefix, substituting absolute paths and your domain:
 ```text
 command="HOIST_DIR=/absolute/private/hoist-data HOIST_DOMAIN=example.com /absolute/path/to/hoist ssh-dispatch",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 YOUR_PUBLIC_KEY
 ```
+
+The generated pre-receive hook hard-codes the executable path at `apps:create` time. Keep
+that path stable; M7 `doctor` will rewrite hooks when the executable moves.
 
 From your computer, create the app through SSH:
 
@@ -38,7 +41,7 @@ ssh hoist@server hoist apps:info hello --json
 
 The push streams Docker's build records and saves the same bytes to
 `$HOIST_DIR/releases/hello/main/v1/build.log`. The release records the full SHA and image
-`hoist/hello:<first-12-SHA-characters>`, with an empty config snapshot. A failed push records
+`hoist/hello:main-v1-<first-12-SHA-characters>`, with an empty config snapshot. A failed push records
 a `failed` release and keeps its log. Branches have separate release numbers; slug collisions
 are refused. Branch deletes do nothing until M5.
 

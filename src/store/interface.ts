@@ -12,7 +12,7 @@ export interface Release {
   git_sha: string;
   image: string;
   config_json: string;
-  status: "building" | "failed" | "live" | "stopped";
+  status: "building" | "built" | "failed" | "live" | "stopped";
 }
 export interface Store {
   latestReleaseNumber(appId: number, branch: string): number;
@@ -23,5 +23,6 @@ export interface Store {
   deleteApp(id: number): void;
   releases(appId: number): Release[];
   insertRelease(input: Omit<Release, "id">): Release;
+  completeRelease(id: number): void;
   failRelease(id: number): void;
 }

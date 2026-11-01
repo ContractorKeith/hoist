@@ -1,11 +1,15 @@
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import type { DockerClient } from "../adapters/interfaces";
-import { buildRelease, reserveRelease } from "../core/build";
+import {
+  buildRelease,
+  removeReleaseImages,
+  reserveRelease,
+} from "../core/build";
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
-import type { App, Store } from "../store/interface";
-import { checkout, confinedContext, requireDockerfile } from "./repository";
+import type { App, Release, Store } from "../store/interface";
+import { checkout, requireDockerfile } from "./repository";
 
 export function parseRefs(input: string): { sha: string; branch: string }[] {
   if (input.length > 1024 * 1024 || input.includes("\0"))
@@ -43,52 +47,67 @@ export async function receive(
   app: App,
   input: string,
   signal: AbortSignal,
+  prepare: typeof checkout = checkout,
 ): Promise<void> {
   const refs = parseRefs(input);
+  if (!refs.length) {
+    console.error("hoist: no branch refs in this push; nothing built");
+    return;
+  }
+  const reserved: Release[] = [];
   const repo = join(root, "repos", `${app.name}.git`);
-  for (const { sha, branch } of refs) {
-    const release = reserveRelease(store, app, branch, sha);
-    let context: Awaited<ReturnType<typeof checkout>> | undefined;
-    let file: Awaited<ReturnType<typeof open>> | undefined;
-    try {
-      const path = privatePath(
-        join(
-          root,
-          "releases",
-          app.name,
-          branchSlug(branch),
-          `v${release.number}`,
-          "build.log",
-        ),
-        false,
-      );
-      const logFile = await open(path, "a", 0o600);
-      file = logFile;
-      await buildRelease(
-        store,
-        docker,
-        release,
-        app,
-        async () => {
-          context = await checkout(root, repo, sha, signal);
-          await requireDockerfile(context.path);
-          return confinedContext(root, context.path);
-        },
-        async (chunk) => {
-          await logFile.writeFile(chunk);
-          await Bun.write(Bun.stderr, chunk);
-        },
-        signal,
-      );
-    } catch (error) {
-      store.failRelease(release.id);
-      throw error;
-    } finally {
+  try {
+    for (const { sha, branch } of refs) {
+      const release = reserveRelease(store, app, branch, sha);
+      reserved.push(release);
+      let context: Awaited<ReturnType<typeof checkout>> | undefined;
+      let file: Awaited<ReturnType<typeof open>> | undefined;
       try {
-        await file?.close();
+        const path = privatePath(
+          join(
+            root,
+            "releases",
+            app.name,
+            branchSlug(branch),
+            `v${release.number}`,
+            "build.log",
+          ),
+          false,
+        );
+        const logFile = await open(path, "a", 0o600);
+        file = logFile;
+        await buildRelease(
+          store,
+          docker,
+          release,
+          app,
+          async () => {
+            context = await prepare(root, repo, sha, signal);
+            await requireDockerfile(context.path);
+            return context.path;
+          },
+          async (chunk) => {
+            await logFile.writeFile(chunk);
+            await Bun.write(Bun.stderr, chunk);
+          },
+          signal,
+        );
+      } catch (error) {
+        store.failRelease(release.id);
+        throw error;
       } finally {
-        await context?.cleanup();
+        try {
+          await file?.close();
+        } finally {
+          await context?.cleanup();
+        }
       }
     }
+  } catch (error) {
+    for (const release of reserved) {
+      store.failRelease(release.id);
+      await removeReleaseImages(docker, app, release);
+    }
+    throw error;
   }
 }

@@ -11,7 +11,7 @@ _Avoid_: service, project, site
 
 **Release**:
 An immutable record of one image, one config snapshot and one git SHA, numbered per app and
-branch (`v1`, `v2`, ...). A rollback creates a new release; it never moves a pointer back.
+branch (`v1`, `v2`, ...). A release is `building` while its image builds, `built` when ready for cutover, then `live`, `stopped` or `failed`. A rollback creates a new release; it never moves a pointer back.
 _Avoid_: deployment, version, build
 
 **Config**:

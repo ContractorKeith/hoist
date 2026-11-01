@@ -36,6 +36,7 @@ export async function destroyApp(
   cleanup: () => Promise<void>,
 ): Promise<void> {
   // TODO M2: remove containers and Caddy routes before deleting the app.
+  // TODO M2 reconcile: fail stale building releases at startup.
   for (const image of await docker.listImages({ "hoist.app": app.name }))
     await docker.removeImage(image);
   await cleanup();

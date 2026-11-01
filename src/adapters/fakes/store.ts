@@ -69,6 +69,10 @@ export class FakeStore implements Store {
     this.rows.push(row);
     return row;
   }
+  completeRelease(id: number): void {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.status = "built";
+  }
   failRelease(id: number): void {
     const row = this.rows.find((r) => r.id === id);
     if (row) row.status = "failed";

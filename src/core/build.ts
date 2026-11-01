@@ -18,12 +18,13 @@ export function reserveRelease(
         .some((row) => row.branch !== branch && branchSlug(row.branch) === slug)
     )
       throw new Error("Branch slug collides with an existing branch");
+    const number = nextReleaseNumber(store, app.id, branch);
     return store.insertRelease({
       app_id: app.id,
       branch,
-      number: nextReleaseNumber(store, app.id, branch),
+      number,
       git_sha: sha,
-      image: `hoist/${app.name}:${sha.slice(0, 12)}`,
+      image: `hoist/${app.name}:${slug}-v${number}-${sha.slice(0, 12)}`,
       config_json: "{}",
       status: "building",
     });
@@ -63,6 +64,7 @@ export async function buildRelease(
         await log(value);
       }
       signal.throwIfAborted();
+      store.completeRelease(release.id);
     } catch (error) {
       await reader.cancel(error).catch(() => {});
       throw error;
@@ -71,20 +73,30 @@ export async function buildRelease(
     }
   } catch (error) {
     store.failRelease(release.id);
-    try {
-      await log(
-        new TextEncoder().encode(
-          `${error instanceof Error ? error.message : String(error)}\n`,
-        ),
-      );
-    } finally {
-      // Remove only this release's image; a reused SHA tag may refer to an older release.
-      for (const image of await docker.listImages({
-        "hoist.app": app.name,
-        "hoist.release": String(release.id),
-      }))
-        await docker.removeImage(image);
-    }
+    await log(
+      new TextEncoder().encode(
+        `${error instanceof Error ? error.message : String(error)}\n`,
+      ),
+    ).catch(() => {});
+    await removeReleaseImages(docker, app, release);
     throw error;
+  }
+}
+
+// Cleanup is best-effort; one Docker error must not hide the build error or skip other images.
+export async function removeReleaseImages(
+  docker: DockerClient,
+  app: App,
+  release: Release,
+): Promise<void> {
+  const images = await docker
+    .listImages({ "hoist.app": app.name, "hoist.release": String(release.id) })
+    .catch(() => []);
+  for (const image of images) {
+    try {
+      await docker.removeImage(image);
+    } catch {
+      /* Keep cleaning the remaining images. */
+    }
   }
 }

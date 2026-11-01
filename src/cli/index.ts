@@ -42,8 +42,11 @@ export function parseCli(args: string[]): {
     json: false,
     force: false,
   };
-  if (verb !== "version" && verb !== "apps:list")
-    result.name = appName(rest.shift() ?? "");
+  if (verb !== "version" && verb !== "apps:list") {
+    const name = rest.shift() ?? "";
+    if (name.startsWith("--")) throw new Error(usage);
+    result.name = appName(name);
+  }
   const seen = new Set<string>();
   while (rest.length) {
     const flag = rest.shift() ?? "";
@@ -138,8 +141,11 @@ export async function run(args: string[]): Promise<number> {
     }
     const name = appName(command.name ?? "");
     if (command.verb === "apps:create") {
-      const domain =
-        command.domain ?? `${name}.${process.env.HOIST_DOMAIN ?? ""}`;
+      if (!command.domain && !process.env.HOIST_DOMAIN)
+        throw new Error(
+          "HOIST_DOMAIN is not set; pass --domain or set HOIST_DOMAIN",
+        );
+      const domain = command.domain ?? `${name}.${process.env.HOIST_DOMAIN}`;
       hostName(domain);
       await createApp(
         store,
