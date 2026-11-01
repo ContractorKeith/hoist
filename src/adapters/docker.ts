@@ -24,11 +24,19 @@ export class Docker implements DockerClient {
     path: string,
     init: RequestInit = {},
   ): Promise<Response> {
-    const response = await fetch(`http://localhost/v1.47${path}`, {
-      signal: AbortSignal.timeout(30000),
-      ...init,
-      unix: this.socket,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`http://localhost/v1.47${path}`, {
+        signal: AbortSignal.timeout(30000),
+        ...init,
+        unix: this.socket,
+      });
+    } catch (error) {
+      throw new Error(
+        `cannot reach Docker at ${this.socket}: ${error instanceof Error ? error.message : String(error)}; is this user in the docker group?`,
+        { cause: error },
+      );
+    }
     if (!response.ok)
       throw new Error(
         `Docker ${init.method ?? "GET"} ${path}: ${response.status} ${await response.text()}`,

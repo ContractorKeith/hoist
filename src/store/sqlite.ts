@@ -10,8 +10,8 @@ export class SqliteStore implements Store {
   constructor(dataDir: string) {
     if (!dataDir || dataDir.includes("\0"))
       throw new Error("Invalid data directory");
-    privatePath(dataDir);
-    privatePath(join(dataDir, "hoist.db"), false);
+    privatePath(dataDir, true, false, dataDir);
+    privatePath(join(dataDir, "hoist.db"), false, false, dataDir);
     this.db = new Database(join(dataDir, "hoist.db"), {
       create: true,
       strict: true,
@@ -104,10 +104,18 @@ export class SqliteStore implements Store {
     return row;
   }
   completeRelease(id: number): void {
-    this.db.run("UPDATE releases SET status = 'built' WHERE id = ?", [id]);
+    const result = this.db.run(
+      "UPDATE releases SET status = 'built' WHERE id = ?",
+      [id],
+    );
+    if (!result.changes) throw new Error(`release ${id} no longer exists`);
   }
   failRelease(id: number): void {
-    this.db.run("UPDATE releases SET status = 'failed' WHERE id = ?", [id]);
+    const result = this.db.run(
+      "UPDATE releases SET status = 'failed' WHERE id = ?",
+      [id],
+    );
+    if (!result.changes) throw new Error(`release ${id} no longer exists`);
   }
 
   close(): void {

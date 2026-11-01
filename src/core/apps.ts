@@ -20,7 +20,13 @@ export async function createApp(
   appName(name);
   healthPath(health);
   if (store.app(name)) throw new Error("App already exists");
-  await provision();
+  try {
+    await provision();
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST")
+      throw new Error("App already exists");
+    throw error;
+  }
   try {
     return store.createApp(name, domain, health);
   } catch (error) {
@@ -35,6 +41,10 @@ export async function destroyApp(
   app: App,
   cleanup: () => Promise<void>,
 ): Promise<void> {
+  if (store.releases(app.id).some((release) => release.status === "building"))
+    throw new Error(
+      `a build is in progress for ${app.name}; wait for it to finish and retry`,
+    );
   // TODO M2: remove containers and Caddy routes before deleting the app.
   // TODO M2 reconcile: fail stale building releases at startup.
   for (const image of await docker.listImages({ "hoist.app": app.name }))

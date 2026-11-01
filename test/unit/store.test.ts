@@ -137,3 +137,24 @@ test("migration 2 preserves M0 releases, adds built and keeps immutable snapshot
   store.deleteApp(1);
   expect(store.releases(1)).toEqual([]);
 });
+
+test("release status transitions reject deleted rows", () => {
+  const store = open();
+  const app = store.createApp("hello", "hello.test", "/");
+  const row = store.insertRelease({
+    app_id: app.id,
+    branch: "main",
+    number: 1,
+    git_sha: "abc",
+    image: "hoist/hello:abc",
+    config_json: "{}",
+    status: "building",
+  });
+  store.deleteApp(app.id);
+  expect(() => store.completeRelease(row.id)).toThrow(
+    `release ${row.id} no longer exists`,
+  );
+  expect(() => store.failRelease(row.id)).toThrow(
+    `release ${row.id} no longer exists`,
+  );
+});

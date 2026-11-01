@@ -29,6 +29,10 @@ jobs:
         run: |
           set -o pipefail
           bun run test:e2e 2>&1 | tee /tmp/hoist-e2e.log
-          grep -F ' 3 pass' /tmp/hoist-e2e.log
+          grep -Fx ' 3 pass' /tmp/hoist-e2e.log
+          grep -Fx ' 0 fail' /tmp/hoist-e2e.log
+          skip_summary=$(awk '/^\(skip\)/ { count++ } END { printf " %d skip", count }' /tmp/hoist-e2e.log)
+          printf '%s\n' "$skip_summary" >> /tmp/hoist-e2e.log
+          grep -Fx ' 0 skip' /tmp/hoist-e2e.log
           grep -F 'Teardown verified' /tmp/hoist-e2e.log
       - run: bun run build && ./dist/hoist version

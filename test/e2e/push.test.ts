@@ -225,6 +225,19 @@ scenario(
       expect((await stat(join(data, "repos/hello.git"))).mode & 0o777).toBe(
         0o700,
       );
+      const tree = (
+        await ok(["git", "rev-parse", "HEAD^{tree}"], { cwd: source })
+      ).stdout.trim();
+      const treePush = await command(
+        ["git", "push", "hoist", `${tree}:refs/heads/treepush`],
+        { cwd: source, env: pushEnv },
+      );
+      expect(treePush.code).not.toBe(0);
+      expect(treePush.output).toContain("pushed object is not a commit");
+      expect(store.releases(app.id)).toHaveLength(1);
+      expect(
+        await docker.listImages({ "hoist.app": "hello", "hoist.sha": tree }),
+      ).toEqual([]);
       await ok(["git", "rm", "Dockerfile"], { cwd: source });
       await commit();
       const rejected = await command(["git", "push", "hoist", "main"], {
@@ -233,6 +246,7 @@ scenario(
       });
       expect(rejected.code).not.toBe(0);
       expect(rejected.output).toContain("add a Dockerfile");
+      expect(rejected.output.match(/Missing root Dockerfile/g)).toHaveLength(1);
       const failed = store.releases(app.id)[1];
       if (!failed) throw new Error("Missing failed release");
       expect(failed.status).toBe("failed");

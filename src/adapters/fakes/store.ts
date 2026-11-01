@@ -71,10 +71,12 @@ export class FakeStore implements Store {
   }
   completeRelease(id: number): void {
     const row = this.rows.find((r) => r.id === id);
-    if (row) row.status = "built";
+    if (!row) throw new Error(`release ${id} no longer exists`);
+    row.status = "built";
   }
   failRelease(id: number): void {
     const row = this.rows.find((r) => r.id === id);
-    if (row) row.status = "failed";
+    if (!row) throw new Error(`release ${id} no longer exists`);
+    row.status = "failed";
   }
 }

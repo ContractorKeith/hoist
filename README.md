@@ -39,6 +39,8 @@ git push hoist main
 ssh hoist@server hoist apps:info hello --json
 ```
 
+Closing the terminal mid-push does not cancel the deploy; the release still lands server-side.
+
 The push streams Docker's build records and saves the same bytes to
 `$HOIST_DIR/releases/hello/main/v1/build.log`. The release records the full SHA and image
 `hoist/hello:main-v1-<first-12-SHA-characters>`, with an empty config snapshot. A failed push records

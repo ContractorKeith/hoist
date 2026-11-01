@@ -70,6 +70,7 @@ test("SSH dispatch accepts only one app component and never shell syntax", () =>
   }
   for (const command of [
     "git-upload-pack 'hello.git'",
+    "git-upload-archive 'hello.git'",
     "git-receive-pack '../hello.git'",
     "git-receive-pack '/etc/hello.git'",
     "git-receive-pack '//hello.git'",
@@ -110,7 +111,7 @@ test("hook refs validate SHAs, ignore tags and deletes, and reject slug collisio
     parseRefs(
       `${zero} ${sha} refs/heads/main\n${sha} ${zero} refs/heads/old\n${zero} ${sha} refs/tags/v1\n`,
     ),
-  ).toEqual([{ sha, branch: "main" }]);
+  ).toEqual([{ oldSha: zero, sha, branch: "main" }]);
   for (const value of [
     "bad\n",
     `${zero} nope refs/heads/main`,
@@ -231,7 +232,7 @@ test("checkout rejects HOIST_DIR/tmp symlinked outside the data root", async () 
     await symlink(outside, join(root, "tmp"));
     await expect(
       checkout(root, join(repo, ".git"), commit, new AbortController().signal),
-    ).rejects.toThrow("escapes");
+    ).rejects.toThrow("is a symlink");
     expect(await readdir(outside)).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -276,6 +277,7 @@ test("app lifecycle uses fake seams and refuses duplicate creation", async () =>
   docker.images.set("hoist/other:old", { "hoist.app": "other" });
   expect(reserveRelease(store, app, "main", sha).number).toBe(1);
   expect(reserveRelease(store, app, "main", sha).number).toBe(2);
+  for (const row of store.rows) store.completeRelease(row.id);
   await destroyApp(store, docker, app, async () => {
     cleaned++;
   });
@@ -356,6 +358,7 @@ test("receive fails and cleans every reserved release when the second ref cannot
           if (++prepared === 2) throw error;
           return { path: root, cleanup: async () => {} };
         },
+        { objectType: async () => "commit", head: async () => null },
       ),
     ).rejects.toBe(error);
     expect(store.rows.map((row) => row.status)).toEqual(["failed", "failed"]);
@@ -415,7 +418,7 @@ test("mid-stream abort fails the release, logs the error and removes its partial
   const app = store.createApp("hello", "hello.test", "/");
   const row = reserveRelease(store, app, "main", sha);
   const abort = new AbortController(),
-    original = new Error("pusher disconnected mid-stream");
+    original = new Error("Build aborted");
   docker.buildImage = async (input, signal) => {
     docker.images.set(input.tag, input.labels);
     return new ReadableStream({
@@ -446,7 +449,7 @@ test("mid-stream abort fails the release, logs the error and removes its partial
     ),
   ).rejects.toBe(original);
   expect(row.status).toBe("failed");
-  expect(log).toBe("progress\npusher disconnected mid-stream\n");
+  expect(log).toBe("progress\nBuild aborted\n");
   expect(docker.images.has(row.image)).toBe(false);
 });
 

@@ -31,6 +31,11 @@ export function reserveRelease(
   });
 }
 
+const loggedErrors = new WeakSet<object>();
+export function wasBuildErrorLogged(error: unknown): boolean {
+  return error instanceof Object && loggedErrors.has(error);
+}
+
 // The hook supplies a confined checkout and durable log sink; core owns release transitions.
 export async function buildRelease(
   store: Store,
@@ -40,6 +45,7 @@ export async function buildRelease(
   prepare: () => Promise<string>,
   log: (chunk: Uint8Array) => Promise<void>,
   signal: AbortSignal,
+  beforeComplete: () => Promise<void> = async () => {},
 ): Promise<void> {
   try {
     signal.throwIfAborted();
@@ -64,6 +70,7 @@ export async function buildRelease(
         await log(value);
       }
       signal.throwIfAborted();
+      await beforeComplete();
       store.completeRelease(release.id);
     } catch (error) {
       await reader.cancel(error).catch(() => {});
@@ -72,12 +79,20 @@ export async function buildRelease(
       reader.releaseLock();
     }
   } catch (error) {
-    store.failRelease(release.id);
+    try {
+      store.failRelease(release.id);
+    } catch {
+      /* The app may have been removed. */
+    }
     await log(
       new TextEncoder().encode(
         `${error instanceof Error ? error.message : String(error)}\n`,
       ),
-    ).catch(() => {});
+    )
+      .then(() => {
+        if (error instanceof Object) loggedErrors.add(error);
+      })
+      .catch(() => {});
     await removeReleaseImages(docker, app, release);
     throw error;
   }

@@ -9,7 +9,11 @@ import {
 import { isAbsolute, join, relative } from "node:path";
 import { privatePath } from "../data";
 
-export async function git(args: string[], cwd?: string): Promise<string> {
+export async function git(
+  args: string[],
+  cwd?: string,
+  missingOkay = false,
+): Promise<string> {
   const child = Bun.spawn(["git", ...args], {
     cwd,
     stdout: "pipe",
@@ -20,6 +24,7 @@ export async function git(args: string[], cwd?: string): Promise<string> {
     new Response(child.stderr).text(),
     child.exited,
   ]);
+  if (code === 1 && missingOkay) return "";
   if (code) throw new Error(`git failed: ${errors.trim()}`);
   return output.trim();
 }
@@ -33,8 +38,11 @@ export function executableCommand(): string {
     : shellQuote(process.execPath);
 }
 export async function createRepo(root: string, name: string): Promise<void> {
-  const repo = join(privatePath(join(root, "repos")), `${name}.git`);
-  privatePath(repo, true, true);
+  const repo = join(
+    privatePath(join(root, "repos"), true, false, root),
+    `${name}.git`,
+  );
+  privatePath(repo, true, true, root);
   try {
     await git(["init", "--bare", "--initial-branch=main", repo]);
     await writeFile(
@@ -66,7 +74,9 @@ export async function checkout(
   sha: string,
   signal: AbortSignal,
 ): Promise<{ path: string; cleanup: () => Promise<void> }> {
-  const path = await mkdtemp(join(privatePath(join(root, "tmp")), "checkout-"));
+  const path = await mkdtemp(
+    join(privatePath(join(root, "tmp"), true, false, root), "checkout-"),
+  );
   try {
     const archive = Bun.spawn(
       ["git", "--git-dir", repo, "archive", "--format=tar", sha],
@@ -102,3 +112,21 @@ export async function requireDockerfile(path: string): Promise<void> {
       "Missing root Dockerfile; add a Dockerfile at the repository root and push again",
     );
 }
+
+export const gitRefs = {
+  objectType: (repo: string, sha: string) =>
+    git(["--git-dir", repo, "cat-file", "-t", sha]),
+  head: async (repo: string, branch: string): Promise<string | null> =>
+    (await git(
+      [
+        "--git-dir",
+        repo,
+        "rev-parse",
+        "--verify",
+        "-q",
+        `refs/heads/${branch}`,
+      ],
+      undefined,
+      true,
+    )) || null,
+};

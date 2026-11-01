@@ -41,8 +41,8 @@ export function parseDispatch(
   command: string,
 ): { kind: "receive"; app: string } | { kind: "cli"; args: string[] } {
   const args = commandArgs(command);
-  if (args[0] === "git-upload-pack")
-    throw new Error("hoist is push-only; git-upload-pack refused");
+  if (args[0] === "git-upload-pack" || args[0] === "git-upload-archive")
+    throw new Error(`hoist is push-only; ${args[0]} refused`);
   if (args[0] === "git-receive-pack") {
     if (args.length !== 2) throw new Error("Invalid git receive command");
     const remote = args[1] ?? "";

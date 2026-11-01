@@ -9,12 +9,14 @@ import {
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 import type { App, Release, Store } from "../store/interface";
-import { checkout, requireDockerfile } from "./repository";
+import { checkout, gitRefs, requireDockerfile } from "./repository";
 
-export function parseRefs(input: string): { sha: string; branch: string }[] {
+export function parseRefs(
+  input: string,
+): { oldSha: string; sha: string; branch: string }[] {
   if (input.length > 1024 * 1024 || input.includes("\0"))
     throw new Error("Invalid ref input");
-  const refs: { sha: string; branch: string }[] = [];
+  const refs: { oldSha: string; sha: string; branch: string }[] = [];
   const slugs = new Set<string>();
   for (const line of input.split("\n")) {
     if (!line) continue;
@@ -35,7 +37,7 @@ export function parseRefs(input: string): { sha: string; branch: string }[] {
     const slug = branchSlug(branch);
     if (slugs.has(slug)) throw new Error("Branch slug collision in push");
     slugs.add(slug);
-    refs.push({ sha: match[2] ?? "", branch });
+    refs.push({ oldSha: match[1] ?? "", sha: match[2] ?? "", branch });
   }
   return refs;
 }
@@ -48,6 +50,7 @@ export async function receive(
   input: string,
   signal: AbortSignal,
   prepare: typeof checkout = checkout,
+  refsClient: typeof gitRefs = gitRefs,
 ): Promise<void> {
   const refs = parseRefs(input);
   if (!refs.length) {
@@ -57,7 +60,9 @@ export async function receive(
   const reserved: Release[] = [];
   const repo = join(root, "repos", `${app.name}.git`);
   try {
-    for (const { sha, branch } of refs) {
+    for (const { oldSha, sha, branch } of refs) {
+      if ((await refsClient.objectType(repo, sha)) !== "commit")
+        throw new Error("pushed object is not a commit");
       const release = reserveRelease(store, app, branch, sha);
       reserved.push(release);
       let context: Awaited<ReturnType<typeof checkout>> | undefined;
@@ -73,6 +78,8 @@ export async function receive(
             "build.log",
           ),
           false,
+          false,
+          root,
         );
         const logFile = await open(path, "a", 0o600);
         file = logFile;
@@ -91,10 +98,14 @@ export async function receive(
             await Bun.write(Bun.stderr, chunk);
           },
           signal,
+          async () => {
+            const current = await refsClient.head(repo, branch);
+            if ((current ?? "0".repeat(40)) !== oldSha)
+              throw new Error(
+                `branch ${branch} moved during build; push again`,
+              );
+          },
         );
-      } catch (error) {
-        store.failRelease(release.id);
-        throw error;
       } finally {
         try {
           await file?.close();
@@ -105,7 +116,11 @@ export async function receive(
     }
   } catch (error) {
     for (const release of reserved) {
-      store.failRelease(release.id);
+      try {
+        store.failRelease(release.id);
+      } catch {
+        /* Still remove images if the row vanished. */
+      }
       await removeReleaseImages(docker, app, release);
     }
     throw error;

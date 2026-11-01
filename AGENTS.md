@@ -34,6 +34,7 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 
 ## Conventions & Gotchas
 
+- Closing the terminal mid-push does not cancel the deploy; the release still lands server-side.
 - `HOIST_DIR` (default `/var/lib/hoist`) holds the private database, bare repos, temporary checkouts and release logs; `HOIST_DOMAIN` supplies the default base domain until M7.
 - Docker containers use `Tty: true`: logs are plain bytes with CRLF line endings and stderr merged into stdout; M4 strips `\r`.
 - The generated pre-receive hook hard-codes the executable path at `apps:create` time; M7 `doctor` will rewrite hooks.

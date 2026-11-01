@@ -4,6 +4,7 @@ import { version } from "../../package.json";
 import { Docker } from "../adapters/docker";
 import { hostName } from "../adapters/validation";
 import { createApp, destroyApp, knownApp } from "../core/apps";
+import { wasBuildErrorLogged } from "../core/build";
 import { appName, healthPath } from "../core/validation";
 import { dataRoot } from "../data";
 import { parseDispatch } from "../git/dispatch";
@@ -56,7 +57,7 @@ export function parseCli(args: string[]): {
       result.json = true;
     else if (flag === "--force" && verb === "apps:destroy") result.force = true;
     else if (flag === "--domain" && verb === "apps:create") {
-      result.domain = rest.shift() ?? "";
+      result.domain = (rest.shift() ?? "").toLowerCase();
       hostName(result.domain);
     } else if (flag === "--health-path" && verb === "apps:create")
       result.health = healthPath(rest.shift() ?? "");
@@ -98,7 +99,7 @@ export async function run(args: string[]): Promise<number> {
       if (!app)
         throw new Error(`Unknown app; run hoist apps:create ${name} first`);
       const controller = new AbortController();
-      const abort = () => controller.abort(new Error("Push disconnected"));
+      const abort = () => controller.abort(new Error("Build aborted"));
       process.on("SIGTERM", abort);
       process.on("SIGHUP", abort);
       try {
@@ -188,7 +189,8 @@ export async function run(args: string[]): Promise<number> {
     console.log(`Destroyed ${name}`);
     return 0;
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    if (!wasBuildErrorLogged(error))
+      console.error(error instanceof Error ? error.message : String(error));
     return 1;
   } finally {
     store?.close();
