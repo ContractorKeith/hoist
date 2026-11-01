@@ -19,11 +19,13 @@ export class FakeDocker implements DockerClient {
   }
   async inspectContainer(
     id: string,
-  ): Promise<{ running: boolean; port: number } | null> {
+    appPort = 8080,
+  ): Promise<{ running: boolean; port: number; appPort: number } | null> {
     this.record("inspectContainer", id);
     return this.containers.has(id)
       ? {
           running: this.running.has(id),
+          appPort,
           port: 30000 + Number.parseInt(id.slice(-4), 16),
         }
       : null;

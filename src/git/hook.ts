@@ -1,5 +1,6 @@
 import { open } from "node:fs/promises";
 import { join } from "node:path";
+import { FileAppLocks } from "../adapters/app-lock";
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
 import {
   buildRelease,
@@ -44,6 +45,14 @@ export function parseRefs(
 }
 
 export async function receive(
+  ...args: Parameters<typeof receiveLocked>
+): Promise<void> {
+  if (!parseRefs(args[4]).length) return receiveLocked(...args);
+  const [root, , , app] = args;
+  await new FileAppLocks(root).withLock(app.name, () => receiveLocked(...args));
+}
+
+async function receiveLocked(
   root: string,
   store: Store,
   docker: DockerClient,
@@ -144,6 +153,7 @@ export async function receive(
           edge.caddy,
           app,
           built,
+          /^0+$/.test(ref.oldSha) ? null : ref.oldSha,
           () => refsClient.head(repo, release.branch),
           edge.health,
           async (message) => {
@@ -151,9 +161,6 @@ export async function receive(
             await logFile.writeFile(chunk);
             await Bun.write(Bun.stderr, chunk).catch(() => {});
           },
-          false,
-          // Git commits refs after pre-receive succeeds. Recheck the expected old tip.
-          /^0+$/.test(ref.oldSha) ? null : ref.oldSha,
         );
       } finally {
         await logFile.close();

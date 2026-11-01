@@ -50,7 +50,12 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
   clamp sizes before Docker, Caddy or the filesystem see them.
 - Run `hoist serve` before pushing; it supervises Caddy and reconciles interrupted builds, live containers and orphan containers on boot.
 - `HOIST_TLS=acme` (default) uses Let's Encrypt with `HOIST_ACME_EMAIL`; `internal` uses the local CA. `HOIST_HTTP_PORT`/`HOIST_HTTPS_PORT` default to 80/443; `HOIST_CADDY_ADMIN_PORT` defaults to 2019 and must match in serve and hooks. Caddy data lives in `HOIST_DIR/caddy`.
-- Containers use the image's single exposed TCP port, otherwise config `PORT` or 8080; Docker assigns the loopback-only published port.
+- Containers use the single exposed TCP port (ignore UDP); no TCP exposure uses `PORT` or 8080; several TCP ports require `PORT`. Docker assigns the loopback-only published port.
+- Per-app PID locks in `HOIST_DIR/locks` serialize hook reserve/build/cutover and reconcile; waiters poll 200 ms for up to 10 minutes and reclaim dead holders.
+- Health requires 2xx; redirects are not followed and 3xx fails cutover.
+- Reconcile logs per-app/release failures and preserves healthy apps; route dedupe selects the newest release id per host.
+- `apps:destroy` removes local resources and rows before routes; unreachable Caddy warns and succeeds because serve rebuilds routes.
+- Five consecutive Caddy exits under 10 s fail serve with exit code and a 50-line stderr tail; shutdown/not-ready cleanup escalates SIGTERM to SIGKILL after 5 s.
 - One process. Caddy is a supervised child; the preview sweeper is a timer. No queue.
 - A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
   change during cutover. Delete is governed by retention (M3).

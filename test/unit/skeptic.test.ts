@@ -208,10 +208,11 @@ test("receive rejects non-commit objects before reserving or preparing", async (
   const store = new FakeStore(),
     docker = new FakeDocker();
   const app = store.createApp("hello", "hello.test", "/");
+  const root = await mkdtemp(join(tmpdir(), "hoist-noncommit-"));
   let prepared = false;
   await expect(
     receive(
-      "/unused",
+      root,
       store,
       docker,
       app,
@@ -228,6 +229,7 @@ test("receive rejects non-commit objects before reserving or preparing", async (
   expect(prepared).toBe(false);
   expect(store.rows).toEqual([]);
   expect(docker.calls).toEqual([]);
+  await rm(root, { recursive: true, force: true });
 });
 
 test("receive detects branch movement after building and removes the rejected image", async () => {
@@ -281,9 +283,8 @@ test("receive accepts an unchanged existing branch and checks it before marking 
       {
         objectType: async () => "commit",
         head: async () => {
-          expect(["building", "built"]).toContain(
-            store.rows[0]?.status ?? "missing",
-          );
+          if (checked) expect(store.rows[0]?.status).toBe("built");
+          else expect(store.rows[0]?.status).toBe("building");
           expect(docker.images.size).toBe(1);
           checked = true;
           return old;

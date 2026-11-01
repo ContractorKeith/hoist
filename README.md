@@ -28,7 +28,9 @@ can reach `serve`. HTTPS URLs printed by the hook use the public default port; a
 
 On startup, hoist fails interrupted `building` releases and removes their images,
 restores missing or stopped live containers, rebuilds routes and removes unreferenced
-app containers. It restarts Caddy with backoff if Caddy exits. SIGTERM stops both
+app containers. It restarts Caddy with backoff if Caddy exits. Five consecutive exits in under 10 seconds
+each stop `serve` with a non-zero exit, the exit code and the last 50 stderr lines.
+A failed app recovery is logged while healthy apps keep serving. SIGTERM stops both
 processes; app containers stay running for the next `serve`.
 
 ## Push an app
@@ -64,13 +66,18 @@ ssh hoist@server hoist apps:info hello --json
 ```
 
 The push ends with `Live: https://hello.example.com`; opening that URL returns your app.
+A per-app PID lock at `$HOIST_DIR/locks/<app>.lock` serializes reserve, build and cutover
+and that app’s boot reconcile. A second holder polls every 200 ms for up to 10 minutes;
+a dead holder’s lock is reclaimed. Other apps can proceed independently.
 Closing the terminal mid-push does not cancel the deploy; the release still lands server-side.
 
 The push streams Docker's build records and saves the same bytes to
 `$HOIST_DIR/releases/hello/main/v1/build.log`. The release records the full SHA and image
-`hoist/hello:main-v1-<first-12-SHA-characters>`, with an empty config snapshot. The container uses its single exposed TCP port; with zero
-or multiple exposed ports it uses config `PORT`, defaulting to `8080`. Docker assigns a
-random host port published only on `127.0.0.1`. A failed health check leaves the previous
+`hoist/hello:main-v1-<first-12-SHA-characters>`, with an empty config snapshot. The container uses its single exposed TCP port (UDP exposures are ignored); with no
+exposed TCP port it uses config `PORT`, defaulting to `8080`. Several exposed TCP ports
+require `PORT` in config; otherwise the push fails with an actionable error. Docker assigns a
+random host port published only on `127.0.0.1`. Health requires HTTP **2xx**; redirects
+are not followed and 3xx fails the health check. A failed health check leaves the previous
 release serving and fails the push. A failed push records
 a `failed` release and keeps its log. Branches have separate release numbers; slug collisions
 are refused. Non-main branches remain `built` until M5 adds preview hosts; branch deletes
@@ -86,6 +93,9 @@ To remove the app, containers, Caddy routes, images, bare repo, release logs and
 ```bash
 ssh hoist@server hoist apps:destroy hello --force
 ```
+
+Destroy also works while `serve` is down: it removes local resources and rows, warns
+that Caddy is unreachable, and lets the next `serve` rebuild routes from the store.
 
 Local `apps:destroy` asks for the app name on a TTY. Without a TTY, `--force` is required.
 The data directory and created files are private (directories and executable hooks `0700`,

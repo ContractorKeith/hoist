@@ -42,12 +42,12 @@ export async function destroyApp(
   app: App,
   cleanup: () => Promise<void>,
   caddy: CaddyAdmin,
+  warn: (message: string) => void = console.error,
 ): Promise<void> {
   if (store.releases(app.id).some((release) => release.status === "building"))
     throw new Error(
       `a build is in progress for ${app.name}; wait for it to finish and retry`,
     );
-  await caddy.removeRoute(app.domain);
   for (const container of await docker.listContainers({
     "hoist.app": app.name,
   })) {
@@ -57,4 +57,16 @@ export async function destroyApp(
   await removeImages(docker, { "hoist.app": app.name });
   await cleanup();
   store.deleteApp(app.id);
+  try {
+    await caddy.removeRoute(app.domain);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes("Caddy admin API not reachable")
+    )
+      throw error;
+    warn(
+      "Caddy not reachable; routes are rebuilt from the store when hoist serve starts",
+    );
+  }
 }

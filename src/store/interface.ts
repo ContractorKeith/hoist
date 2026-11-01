@@ -29,7 +29,8 @@ export interface Store {
   failRelease(id: number): void;
   setReleaseState(
     id: number,
-    status: Release["status"],
+    status: "live" | "stopped",
     containerId?: string | null,
+    expectedStatus?: "built" | "live",
   ): void;
 }

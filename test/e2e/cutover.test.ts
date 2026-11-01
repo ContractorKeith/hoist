@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { reserveRelease } from "../../src/core/build";
-import { eventually } from "./harness";
-import { withSSH } from "./ssh";
+import { eventually, highPort } from "./harness";
+import { command, ok, withSSH } from "./ssh";
 
 const scenario = process.env.HOIST_E2E !== undefined ? test : test.skip;
 scenario(
@@ -55,31 +55,41 @@ scenario(
       let requesting = true,
         count = 0;
       const errors: unknown[] = [];
-      const loop = (async () => {
+      const bodies = new Set<string>();
+      const loops = Array.from({ length: 4 }, async () => {
         while (requesting) {
           try {
             const response = await request();
             if (response.status !== 200) errors.push(response.status);
-            await response.text();
+            bodies.add(await response.text());
             count++;
           } catch (error) {
             errors.push(error);
           }
-          await Bun.sleep(5);
         }
-      })();
+      });
+      await eventually(async () => {
+        expect(bodies.has("hello from hoist\n")).toBe(true);
+      });
       let second: Awaited<ReturnType<typeof push>>;
       try {
         second = await push();
+        await eventually(async () => {
+          expect(count).toBeGreaterThanOrEqual(200);
+          expect(bodies.has("second release\n")).toBe(true);
+        });
       } finally {
         requesting = false;
-        await loop;
+        await Promise.all(loops);
       }
       expect(second.code).toBe(0);
-      expect(count).toBeGreaterThan(0);
+      expect(count).toBeGreaterThanOrEqual(200);
+      expect(bodies).toEqual(
+        new Set(["hello from hoist\n", "second release\n"]),
+      );
       expect(errors).toEqual([]);
       console.log(
-        `Cutover request loop: ${count} responses, zero non-200 responses.`,
+        `Cutover request loop: ${count} responses across 4 loops, both bodies observed, zero non-200 responses.`,
       );
       expect(rows()[0]?.status).toBe("stopped");
       expect(rows()[1]?.status).toBe("live");
@@ -119,7 +129,8 @@ scenario(
       await docker.removeContainer(live.container_id);
       const orphan = await docker.createContainer({
         image: live.image,
-        labels: { "hoist.app": app.name },
+        // Docker inherits image labels, so explicitly name an absent release.
+        labels: { "hoist.app": app.name, "hoist.release": "999999" },
         port: 8080,
         publishPort: "",
       });
@@ -220,4 +231,156 @@ scenario(
     });
   },
   90000,
+);
+
+scenario(
+  "two concurrent main pushes serialize cutover and leave exactly one live container",
+  async () => {
+    await withSSH(async (h) => {
+      await h.control("apps:create", "hello");
+      expect((await h.push()).code).toBe(0);
+      const clones = [join(h.root, "clone-one"), join(h.root, "clone-two")];
+      const remote = (
+        await ok(["git", "remote", "get-url", "hoist"], { cwd: h.source })
+      ).stdout.trim();
+      for (const [index, clone] of clones.entries()) {
+        await ok(["git", "clone", h.source, clone]);
+        await ok(["git", "remote", "add", "hoist", remote], { cwd: clone });
+        await writeFile(join(clone, "index.html"), `concurrent ${index}\n`);
+        await ok(["git", "add", "."], { cwd: clone });
+        await ok(
+          [
+            "git",
+            "-c",
+            "user.name=ContractorKeith",
+            "-c",
+            "user.email=ContractorKeith@users.noreply.github.com",
+            "commit",
+            "-m",
+            `clone ${index}`,
+          ],
+          { cwd: clone },
+        );
+      }
+      const results = await Promise.all(
+        clones.map((clone) =>
+          command(["git", "push", "hoist", "main"], {
+            cwd: clone,
+            env: h.pushEnv,
+          }),
+        ),
+      );
+      for (const result of results) {
+        expect(result.output).toMatch(
+          /Live: https:|branch main moved|branch moved|fetch first|failed to push|stale info/,
+        );
+        console.log(
+          `Concurrent push exit ${result.code}: ${result.output
+            .split("\n")
+            .filter((line) => /Live:|branch .*moved|rejected/.test(line))
+            .join("; ")}`,
+        );
+      }
+      expect(results.some((result) => result.code === 0)).toBe(true);
+      const app = h.store.app("hello");
+      if (!app) throw new Error("Missing app");
+      const releases = h.store.releases(app.id),
+        live = releases.filter((row) => row.status === "live");
+      expect(live).toHaveLength(1);
+      const containers = await h.docker.listContainers({
+        "hoist.app": "hello",
+      });
+      expect(containers).toHaveLength(1);
+      expect(containers[0]?.id).toBe(live[0]?.container_id ?? undefined);
+      expect(
+        releases.filter(
+          (row) => row.status === "built" || row.status === "building",
+        ),
+      ).toEqual([]);
+      await h.control("apps:destroy", "hello", "--force");
+    });
+  },
+  180000,
+);
+
+scenario(
+  "a health path returning HTTP 302 fails the push",
+  async () => {
+    await withSSH(async (h) => {
+      await h.control("apps:create", "hello", "--health-path", "/");
+      await writeFile(
+        join(h.source, "Dockerfile"),
+        'FROM busybox:1.37.0\nEXPOSE 8080\nCMD ["sh", "-c", "while true; do printf \'HTTP/1.1 302 Found\\r\\nLocation: /ready\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n\' | nc -l -p 8080; done"]\n',
+      );
+      await h.commit();
+      const result = await h.push();
+      expect(result.code).not.toBe(0);
+      expect(result.output).toContain("HTTP 302");
+      expect(result.output).toContain("expected HTTP 2xx");
+      const app = h.store.app("hello");
+      if (!app) throw new Error("Missing app");
+      expect(h.store.releases(app.id)[0]?.status).toBe("failed");
+      expect(await h.docker.listContainers({ "hoist.app": "hello" })).toEqual(
+        [],
+      );
+      await h.stopServe();
+      const destroyed = await h.control("apps:destroy", "hello", "--force");
+      expect(destroyed.output).toContain(
+        "Caddy not reachable; routes are rebuilt from the store when hoist serve starts",
+      );
+      expect(h.store.apps()).toEqual([]);
+    });
+  },
+  120000,
+);
+
+scenario(
+  "Caddy bind failures exit serve after five fast crashes with stderr",
+  async () => {
+    await withSSH(async (h) => {
+      const occupied = Bun.serve({
+        hostname: "0.0.0.0",
+        port: 0,
+        fetch: () => new Response("occupied"),
+      });
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          join(import.meta.dir, "../../src/cli/index.ts"),
+          "serve",
+        ],
+        {
+          env: {
+            ...h.env,
+            HOIST_DIR: join(h.root, "crash-data"),
+            HOIST_HTTPS_PORT: String(occupied.port),
+            HOIST_CADDY_ADMIN_PORT: String(await highPort()),
+            HOIST_HTTP_PORT: String(await highPort()),
+          },
+          stdout: "ignore",
+          stderr: "pipe",
+        },
+      );
+      const output = new Response(child.stderr).text();
+      try {
+        const code = await Promise.race([
+          child.exited,
+          Bun.sleep(20000).then(() => {
+            throw new Error("serve kept crash-looping");
+          }),
+        ]);
+        const stderr = await output;
+        expect(code).not.toBe(0);
+        expect(stderr).toContain("five consecutive times under 10 s");
+        expect(stderr).toContain("address already in use");
+        expect(stderr).toContain("Caddy exited with code");
+      } finally {
+        if (child.exitCode === null) child.kill("SIGKILL");
+        await child.exited;
+        await output;
+        await occupied.stop(true);
+      }
+    });
+  },
+  60000,
 );

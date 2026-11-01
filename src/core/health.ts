@@ -1,5 +1,5 @@
 export function healthyStatus(status: number): boolean {
-  return status >= 200 && status < 400;
+  return status >= 200 && status < 300;
 }
 
 // The probe owns HTTP; core owns the health deadline and polling policy.
@@ -24,5 +24,7 @@ export async function pollHealth(
     }
     await clock.sleep(Math.min(500, Math.max(0, deadline - clock.now())));
   }
-  throw new Error(`Health check GET ${path} failed after 30 s: ${output}`);
+  throw new Error(
+    `Health check GET ${path} failed after 30 s: ${output}; expected HTTP 2xx`,
+  );
 }

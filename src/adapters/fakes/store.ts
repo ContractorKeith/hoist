@@ -75,22 +75,26 @@ export class FakeStore implements Store {
   }
   completeRelease(id: number): void {
     const row = this.rows.find((r) => r.id === id);
-    if (!row) throw new Error(`release ${id} no longer exists`);
+    if (row?.status !== "building")
+      throw new Error(`release ${id} no longer exists or status changed`);
     row.status = "built";
   }
   setReleaseState(
     id: number,
-    status: Release["status"],
+    status: "live" | "stopped",
     containerId: string | null = null,
+    expectedStatus: "built" | "live" = status === "live" ? "built" : "live",
   ): void {
     const row = this.rows.find((r) => r.id === id);
-    if (!row) throw new Error(`release ${id} no longer exists`);
+    if (!row || row.status !== expectedStatus)
+      throw new Error(`release ${id} no longer exists or status changed`);
     row.status = status;
     row.container_id = containerId;
   }
   failRelease(id: number): void {
     const row = this.rows.find((r) => r.id === id);
-    if (!row) throw new Error(`release ${id} no longer exists`);
+    if (!row || row.status === "live" || row.status === "stopped")
+      throw new Error(`release ${id} no longer exists or status changed`);
     row.status = "failed";
   }
 }

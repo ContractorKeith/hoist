@@ -105,14 +105,15 @@ export class SqliteStore implements Store {
   }
   completeRelease(id: number): void {
     const result = this.db.run(
-      "UPDATE releases SET status = 'built' WHERE id = ?",
+      "UPDATE releases SET status = 'built' WHERE id = ? AND status = 'building'",
       [id],
     );
-    if (!result.changes) throw new Error(`release ${id} no longer exists`);
+    if (!result.changes)
+      throw new Error(`release ${id} no longer exists or status changed`);
   }
   failRelease(id: number): void {
     const result = this.db.run(
-      "UPDATE releases SET status = 'failed' WHERE id = ?",
+      "UPDATE releases SET status = 'failed' WHERE id = ? AND status NOT IN ('live', 'stopped')",
       [id],
     );
     if (!result.changes) throw new Error(`release ${id} no longer exists`);
@@ -120,12 +121,13 @@ export class SqliteStore implements Store {
 
   setReleaseState(
     id: number,
-    status: Release["status"],
+    status: "live" | "stopped",
     containerId: string | null = null,
+    expectedStatus: "built" | "live" = status === "live" ? "built" : "live",
   ): void {
     const result = this.db.run(
-      "UPDATE releases SET status = ?, container_id = ? WHERE id = ?",
-      [status, containerId, id],
+      "UPDATE releases SET status = ?, container_id = ? WHERE id = ? AND status = ?",
+      [status, containerId, id, expectedStatus],
     );
     if (!result.changes) throw new Error(`release ${id} no longer exists`);
   }

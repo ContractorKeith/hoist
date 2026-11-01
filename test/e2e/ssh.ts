@@ -170,18 +170,22 @@ async function startSSH(executable?: string) {
       "-f",
       join(root, "client"),
     ]);
-    const environment = Object.entries(env)
+    const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+    const assignments = Object.entries(env)
       .filter(([key]) => key.startsWith("HOIST_") || key === "TMPDIR")
-      .map(([key, value]) => `environment="${key}=${value}"`)
-      .join(",");
+      .map(([key, value]) => `${key}=${quote(value ?? "")}`)
+      .join(" ");
+    const forced = `${assignments} ${entry.map(quote).join(" ")} ssh-dispatch`
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"');
     await writeFile(
       join(root, "authorized_keys"),
-      `command="${entry.join(" ")} ssh-dispatch",${environment},no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ${await readFile(join(root, "client.pub"), "utf8")}`,
+      `command="${forced}",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ${await readFile(join(root, "client.pub"), "utf8")}`,
     );
     const config = join(root, "sshd_config");
     await writeFile(
       config,
-      `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${root}/host\nAuthorizedKeysFile ${root}/authorized_keys\nPidFile none\nUsePAM no\nStrictModes no\nPermitUserEnvironment yes\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\nLogLevel VERBOSE\n`,
+      `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${root}/host\nAuthorizedKeysFile ${root}/authorized_keys\nPidFile none\nUsePAM no\nStrictModes no\nPermitUserEnvironment no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\nLogLevel VERBOSE\n`,
     );
     // Leases stay held throughout setup and are released immediately before spawning.
     await lease.release();

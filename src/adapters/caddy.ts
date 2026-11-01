@@ -14,6 +14,7 @@ export class Caddy implements CaddyAdmin {
   private async request(
     path: string,
     init: RequestInit = {},
+    allowConflict = false,
   ): Promise<Response> {
     let response: Response;
     try {
@@ -28,7 +29,7 @@ export class Caddy implements CaddyAdmin {
         { cause: error },
       );
     }
-    if (!response.ok)
+    if (!response.ok && !(allowConflict && response.status === 412))
       throw new Error(
         `Caddy ${init.method ?? "GET"} ${path}: ${response.status} ${await response.text()}`,
       );
@@ -66,25 +67,35 @@ export class Caddy implements CaddyAdmin {
   private async changeRoute(host: string, upstream?: string): Promise<void> {
     validate.hostName(host);
     if (upstream !== undefined) validate.upstreamAddress(upstream);
-    const response = await this.request(this.routesPath);
-    const etag = response.headers.get("Etag");
-    if (!etag) throw new Error("Caddy response missing Etag");
-    const routes = (await response.json()) as Record<string, unknown>[];
-    const id = `hoist-${host}`;
-    const next = routes.filter((route) => route["@id"] !== id);
-    if (upstream !== undefined)
-      next.push({
-        "@id": id,
-        match: [{ host: [host] }],
-        handle: [{ handler: "reverse_proxy", upstreams: [{ dial: upstream }] }],
-        terminal: true,
-      });
-    // Reject a concurrent edit rather than silently overwriting another route.
-    await this.request(this.routesPath, {
-      method: "PATCH",
-      headers: { "If-Match": etag },
-      body: JSON.stringify(next),
-    });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const response = await this.request(this.routesPath);
+      const etag = response.headers.get("Etag");
+      if (!etag) throw new Error("Caddy response missing Etag");
+      const routes = (await response.json()) as Record<string, unknown>[];
+      const id = `hoist-${host}`;
+      const next = routes.filter((route) => route["@id"] !== id);
+      if (upstream !== undefined)
+        next.push({
+          "@id": id,
+          match: [{ host: [host] }],
+          handle: [
+            { handler: "reverse_proxy", upstreams: [{ dial: upstream }] },
+          ],
+          terminal: true,
+        });
+      const updated = await this.request(
+        this.routesPath,
+        {
+          method: "PATCH",
+          headers: { "If-Match": etag },
+          body: JSON.stringify(next),
+        },
+        true,
+      );
+      await updated.body?.cancel();
+      if (updated.status !== 412) return;
+    }
+    throw new Error("Caddy route update conflicted after 5 attempts");
   }
 
   async upsertRoute(host: string, upstream: string): Promise<void> {

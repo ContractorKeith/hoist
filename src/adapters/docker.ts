@@ -145,17 +145,19 @@ export class Docker implements DockerClient {
     const row = (await (
       await this.request(`/images/${encodeURIComponent(image)}/json`)
     ).json()) as { Config: { ExposedPorts?: Record<string, unknown> } };
-    return Object.keys(row.Config.ExposedPorts ?? {}).map((key) => {
-      if (!/^[0-9]+\/tcp$/.test(key)) return 0;
-      const port = Number(key.split("/")[0]);
-      validate.port(port);
-      return port;
-    });
+    return Object.keys(row.Config.ExposedPorts ?? {})
+      .filter((key) => /^[0-9]+\/tcp$/.test(key))
+      .map((key) => {
+        const port = Number(key.split("/")[0]);
+        validate.port(port);
+        return port;
+      });
   }
 
   async inspectContainer(
     id: string,
-  ): Promise<{ running: boolean; port: number } | null> {
+    appPort?: number,
+  ): Promise<{ running: boolean; port: number; appPort: number } | null> {
     validate.containerId(id);
     let response: Response;
     try {
@@ -167,16 +169,34 @@ export class Docker implements DockerClient {
     }
     const row = (await response.json()) as {
       State: { Running: boolean };
+      HostConfig: {
+        PortBindings?: Record<
+          string,
+          { HostIp: string; HostPort: string }[] | null
+        >;
+      };
       NetworkSettings: {
         Ports: Record<string, { HostIp: string; HostPort: string }[] | null>;
       };
     };
-    const bindings = Object.values(row.NetworkSettings.Ports ?? {})
-      .flatMap((value) => value ?? [])
-      .filter((value) => value.HostIp === "127.0.0.1");
-    const port = Number(bindings[0]?.HostPort ?? 0);
+    const ports = row.NetworkSettings.Ports ?? {};
+    const published = row.HostConfig.PortBindings ?? {};
+    const selected =
+      appPort ??
+      Number(
+        Object.keys(published)
+          .find((key) =>
+            published[key]?.some((binding) => binding.HostIp === "127.0.0.1"),
+          )
+          ?.split("/")[0],
+      );
+    validate.port(selected);
+    const binding = ports[`${selected}/tcp`]?.find(
+      (value) => value.HostIp === "127.0.0.1",
+    );
+    const port = Number(binding?.HostPort ?? 0);
     if (row.State.Running) validate.port(port);
-    return { running: row.State.Running, port };
+    return { running: row.State.Running, port, appPort: selected };
   }
 
   async createContainer(input: ContainerSpec): Promise<string> {
@@ -274,7 +294,7 @@ export class Docker implements DockerClient {
   async listImages(labels: Labels): Promise<string[]> {
     validate.labels(labels);
     const filters = new URLSearchParams({
-      all: "false",
+      all: "true",
       filters: JSON.stringify({
         label: Object.entries(labels).map(([key, value]) => `${key}=${value}`),
       }),

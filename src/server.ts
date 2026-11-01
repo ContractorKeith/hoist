@@ -1,10 +1,17 @@
 import { join } from "node:path";
+import { FileAppLocks } from "./adapters/app-lock";
 import { Caddy } from "./adapters/caddy";
 import { ensureCaddy } from "./adapters/caddy-binary";
 import { Docker } from "./adapters/docker";
 import { checkHealth } from "./adapters/health";
+import { stopChild } from "./adapters/process";
 import { hostName, port } from "./adapters/validation";
-import { type CaddySettings, caddyConfig } from "./core/caddy-config";
+import {
+  type CaddySettings,
+  caddyConfig,
+  newestRoutes,
+  type ReleaseRoute,
+} from "./core/caddy-config";
 import { reconcile } from "./core/reconcile";
 import { dataRoot, privatePath } from "./data";
 import { SqliteStore } from "./store/sqlite";
@@ -42,12 +49,14 @@ export async function serve(): Promise<void> {
   const store = new SqliteStore(root),
     docker = new Docker(),
     caddy = new Caddy(settings.adminPort);
+  const locks = new FileAppLocks(root);
   let stopping = false;
+  let stoppingChild: Promise<void> | undefined;
   let child: ReturnType<typeof Bun.spawn> | undefined;
   let wake: (() => void) | undefined;
   const stop = () => {
     stopping = true;
-    child?.kill("SIGTERM");
+    if (child) stoppingChild ??= stopChild(child);
     wake?.();
   };
   process.on("SIGTERM", stop);
@@ -64,34 +73,63 @@ export async function serve(): Promise<void> {
     privatePath(join(root, "caddy"), true, false, root);
     let backoff = 100;
     let boot = true;
+    let fastExits = 0;
     while (!stopping) {
       // Rebuild from the store on each restart; never replay a stale file after cutover.
-      const routes: { host: string; upstream: string }[] = [];
+      const routes: ReleaseRoute[] = [];
       for (const app of store.apps()) {
-        hostName(app.domain);
-        for (const release of store
-          .releases(app.id)
-          .filter((row) => row.status === "live")) {
-          const info = release.container_id
-            ? await docker.inspectContainer(release.container_id)
-            : null;
-          if (info?.running)
-            routes.push({
-              host: app.domain,
-              upstream: `127.0.0.1:${info.port}`,
-            });
+        try {
+          hostName(app.domain);
+          for (const release of store
+            .releases(app.id)
+            .filter((row) => row.status === "live")) {
+            try {
+              const info = release.container_id
+                ? await docker.inspectContainer(release.container_id)
+                : null;
+              if (info?.running)
+                routes.push({
+                  host: app.domain,
+                  upstream: `127.0.0.1:${info.port}`,
+                  releaseId: release.id,
+                });
+            } catch (error) {
+              console.error(
+                `${app.name} release ${release.id}: ${String(error)}`,
+              );
+            }
+          }
+        } catch (error) {
+          console.error(`${app.name}: ${String(error)}`);
         }
       }
       await Bun.write(
         configPath,
-        JSON.stringify(caddyConfig(settings, routes)),
+        JSON.stringify(caddyConfig(settings, newestRoutes(routes))),
       );
       const childStarted = Date.now();
       child = Bun.spawn([binary, "run", "--config", configPath], {
         env: { ...process.env, XDG_DATA_HOME: root, XDG_CONFIG_HOME: root },
         stdout: "inherit",
-        stderr: "inherit",
+        stderr: "pipe",
       });
+      const current = child;
+      const tail: string[] = [];
+      const stderrDone = (async () => {
+        let pending = "";
+        const decoder = new TextDecoder();
+        for await (const chunk of current.stderr as ReadableStream<Uint8Array>) {
+          await Bun.write(Bun.stderr, chunk).catch(() => {});
+          pending += decoder.decode(chunk, { stream: true });
+          const lines = pending.split("\n");
+          pending = lines.pop() ?? "";
+          tail.push(...lines);
+          if (tail.length > 50) tail.splice(0, tail.length - 50);
+          if (pending.length > 65536) pending = pending.slice(-65536);
+        }
+        if (pending) tail.push(pending);
+        if (tail.length > 50) tail.splice(0, tail.length - 50);
+      })();
       let ready = false;
       for (
         let attempt = 0;
@@ -120,6 +158,7 @@ export async function serve(): Promise<void> {
             docker,
             caddy,
             settings,
+            locks,
             checkHealth,
             startedAt,
           );
@@ -127,11 +166,23 @@ export async function serve(): Promise<void> {
         }
         console.error("hoist serve ready");
       }
-      if (!ready && child.exitCode === null) child.kill("SIGTERM");
-      await child.exited;
+      if (!ready && child.exitCode === null) await stopChild(child);
+      const code = await child.exited;
+      await stderrDone;
+      if (stoppingChild) await stoppingChild;
+      stoppingChild = undefined;
       if (!stopping) {
-        if (Date.now() - childStarted >= 10000) backoff = 100;
-        console.error(`Caddy exited; restarting in ${backoff} ms`);
+        if (Date.now() - childStarted >= 10000) {
+          backoff = 100;
+          fastExits = 0;
+        } else fastExits++;
+        if (fastExits >= 5)
+          throw new Error(
+            `Caddy exited with code ${code} five consecutive times under 10 s; last stderr lines:\n${tail.join("\n")}`,
+          );
+        console.error(
+          `Caddy exited with code ${code}; restarting in ${backoff} ms`,
+        );
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, backoff);
           wake = () => {
@@ -143,8 +194,7 @@ export async function serve(): Promise<void> {
       }
     }
   } finally {
-    if (child?.exitCode === null) child.kill("SIGTERM");
-    if (child) await child.exited;
+    if (child) await (stoppingChild ?? stopChild(child));
     process.off("SIGTERM", stop);
     process.off("SIGINT", stop);
     store.close();

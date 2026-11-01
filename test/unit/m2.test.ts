@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { FakeAppLocks } from "../../src/adapters/fakes/app-lock";
 import { FakeCaddy } from "../../src/adapters/fakes/caddy";
 import { FakeDocker } from "../../src/adapters/fakes/docker";
 import { FakeStore } from "../../src/adapters/fakes/store";
@@ -27,7 +28,7 @@ function setup() {
   const run = (
     health: HealthCheck = async () => {},
     head = async (): Promise<string | null> => sha,
-  ) => cutover(store, docker, caddy, app, release, head, health);
+  ) => cutover(store, docker, caddy, app, release, sha, head, health);
   return { store, docker, caddy, app, release, run };
 }
 
@@ -41,7 +42,7 @@ test("cutover starts, checks health, swaps, then stops old and commits statuses"
     labels: { "hoist.app": app.name },
   });
   await docker.startContainer(id);
-  store.setReleaseState(old.id, "live", id);
+  store.setReleaseState(old.id, "live", id, "live");
   const order: string[] = [];
   const swap = caddy.upsertRoute.bind(caddy),
     stop = docker.stopContainer.bind(docker);
@@ -132,12 +133,15 @@ test("container start failure removes the created container", async () => {
 test("port selection uses one exposed TCP port, otherwise PORT or 8080", () => {
   expect(appPort([80], { PORT: "3000" })).toBe(80);
   expect(appPort([], {})).toBe(8080);
+  expect(() => appPort([80, 443], {})).toThrow(
+    "image exposes several ports; set PORT in config",
+  );
   expect(appPort([80, 443], { PORT: "3000" })).toBe(3000);
   for (const value of ["0", "65536", "x", "2.5"])
     expect(() => appPort([], { PORT: value })).toThrow("Invalid app port");
-  for (const status of [200, 204, 301, 399])
+  for (const status of [200, 204, 299])
     expect(healthyStatus(status)).toBe(true);
-  for (const status of [199, 400, 500])
+  for (const status of [199, 301, 399, 400, 500])
     expect(healthyStatus(status)).toBe(false);
 });
 
@@ -212,7 +216,14 @@ test("reconcile fails stale building releases, removes images, restores missing 
     port: 8080,
     publishPort: "",
   });
-  await reconcile(store, docker, caddy, settings, async () => {});
+  await reconcile(
+    store,
+    docker,
+    caddy,
+    settings,
+    new FakeAppLocks(),
+    async () => {},
+  );
   expect(stale.status).toBe("failed");
   expect(docker.images.size).toBe(0);
   expect(release.status).toBe("live");
@@ -227,13 +238,27 @@ test("reconcile keeps a running live container and replaces a stopped one withou
   await run();
   const id = release.container_id ?? "";
   docker.calls.length = 0;
-  await reconcile(store, docker, caddy, settings, async () => {});
+  await reconcile(
+    store,
+    docker,
+    caddy,
+    settings,
+    new FakeAppLocks(),
+    async () => {},
+  );
   expect(docker.calls.some((call) => call.method === "createContainer")).toBe(
     false,
   );
   expect(release.container_id).toBe(id);
   await docker.stopContainer(id);
-  await reconcile(store, docker, caddy, settings, async () => {});
+  await reconcile(
+    store,
+    docker,
+    caddy,
+    settings,
+    new FakeAppLocks(),
+    async () => {},
+  );
   expect(release.container_id).not.toBe(id);
   expect(docker.containers.has(id)).toBe(false);
 });
@@ -249,7 +274,7 @@ test("destroy removes route, containers, images, files then rows", async () => {
     async () => {
       expect(docker.containers.size).toBe(0);
       expect(docker.images.size).toBe(0);
-      expect(caddy.routes.size).toBe(0);
+      expect(caddy.routes.size).toBe(1);
     },
     caddy,
   );
@@ -265,6 +290,7 @@ test("reconcile preserves builds created after process start", async () => {
     docker,
     caddy,
     settings,
+    new FakeAppLocks(),
     async () => {},
     "2026-11-01T00:00:00.000Z",
   );
@@ -274,21 +300,27 @@ test("reconcile preserves builds created after process start", async () => {
 test("failed boot recovery preserves the live row for a retry and removes its candidate", async () => {
   const { store, docker, caddy, release } = setup();
   store.setReleaseState(release.id, "live");
-  await expect(
-    reconcile(store, docker, caddy, settings, async () => {
+  const errors = await reconcile(
+    store,
+    docker,
+    caddy,
+    settings,
+    new FakeAppLocks(),
+    async () => {
       throw new Error("HTTP 500");
-    }),
-  ).rejects.toThrow("HTTP 500");
+    },
+  );
+  expect(errors.join("\n")).toContain("HTTP 500");
   expect(release.status).toBe("live");
   expect(docker.containers.size).toBe(0);
-  expect(caddy.calls).toEqual([]);
+  expect(caddy.calls.at(-1)?.method).toBe("loadConfig");
 });
 
-test("destroy re-lists images because removing a leaf can reveal a labelled parent", async () => {
+test("destroy removes all remaining labelled images", async () => {
   const { store, docker, caddy, app } = setup();
   let remaining = 3;
   docker.listImages = async () =>
-    remaining ? [`hoist/hello:layer${remaining}`] : [];
+    Array.from({ length: remaining }, (_, i) => `hoist/hello:layer${i}`);
   docker.removeImage = async () => {
     remaining--;
   };
@@ -297,11 +329,11 @@ test("destroy re-lists images because removing a leaf can reveal a labelled pare
   expect(store.apps()).toEqual([]);
 });
 
-test("health polls every 500 ms and accepts a redirect without following it", async () => {
+test("health polls every 500 ms until a 2xx response", async () => {
   let now = 0,
     calls = 0;
   const sleeps: number[] = [];
-  await pollHealth("/ready", async () => (++calls === 1 ? 500 : 302), {
+  await pollHealth("/ready", async () => (++calls === 1 ? 302 : 204), {
     now: () => now,
     sleep: async (ms) => {
       sleeps.push(ms);

@@ -8,6 +8,20 @@ export interface CaddySettings {
   email?: string;
   dataDir: string;
 }
+export interface ReleaseRoute {
+  host: string;
+  upstream: string;
+  releaseId?: number;
+}
+export function newestRoutes(routes: ReleaseRoute[]): ReleaseRoute[] {
+  const hosts = new Map<string, ReleaseRoute>();
+  for (const route of routes) {
+    const previous = hosts.get(route.host);
+    if (!previous || (route.releaseId ?? 0) >= (previous.releaseId ?? 0))
+      hosts.set(route.host, route);
+  }
+  return [...hosts.values()];
+}
 export function route(host: string, upstream: string): Record<string, unknown> {
   return {
     "@id": `hoist-${host}`,
@@ -18,7 +32,7 @@ export function route(host: string, upstream: string): Record<string, unknown> {
 }
 export function caddyConfig(
   settings: CaddySettings,
-  routes: { host: string; upstream: string }[],
+  routes: ReleaseRoute[],
 ): CaddyConfig {
   return {
     admin: {
@@ -58,7 +72,9 @@ export function caddyConfig(
           hoist: {
             listen: [`:${settings.httpsPort}`],
             tls_connection_policies: [{}],
-            routes: routes.map((item) => route(item.host, item.upstream)),
+            routes: newestRoutes(routes).map((item) =>
+              route(item.host, item.upstream),
+            ),
           },
         },
       },

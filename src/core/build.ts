@@ -116,14 +116,25 @@ export async function removeReleaseImages(
   }
 }
 
-// Removing a leaf can expose another labelled parent in Docker's image listing.
+// Retry dependent images only while the full labelled listing shrinks.
 export async function removeImages(
   docker: DockerClient,
   labels: Labels,
 ): Promise<void> {
-  while (true) {
+  let previous = Number.POSITIVE_INFINITY;
+  for (let iteration = 0; iteration < 10; iteration++) {
     const images = await docker.listImages(labels);
     if (!images.length) return;
-    for (const image of images) await docker.removeImage(image);
+    if (images.length >= previous)
+      throw new Error(
+        `image cleanup did not shrink; images left: ${images.join(", ")}`,
+      );
+    previous = images.length;
+    for (const image of images) await docker.removeImage(image).catch(() => {});
   }
+  const images = await docker.listImages(labels);
+  if (images.length)
+    throw new Error(
+      `image cleanup exceeded 10 iterations; images left: ${images.join(", ")}`,
+    );
 }
