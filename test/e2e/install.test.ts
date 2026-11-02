@@ -7,6 +7,7 @@ import { DashboardStore } from "../../src/store/dashboard";
 import { SqliteStore } from "../../src/store/sqlite";
 import {
   beforeInstall,
+  checkDomainNormalization,
   checkInstalledFiles,
   downloadGuards,
   installerCommands,
@@ -50,6 +51,7 @@ test.skipIf(process.env.HOIST_E2E !== "1")(
         `${name}:/owner.pub`,
       ]);
       await beforeInstall(name);
+      await checkDomainNormalization(name);
       const install = [
         "docker",
         "exec",

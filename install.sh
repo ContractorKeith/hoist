@@ -44,6 +44,11 @@ if [ ! -f /etc/hoist/hoist.env ]; then
   fi
   [ -n "${HOIST_DOMAIN:-}" ] || fail 'Set HOIST_DOMAIN for a non-interactive install.'
   [ -n "${HOIST_ACME_EMAIL:-}" ] || fail 'Set HOIST_ACME_EMAIL for a non-interactive install.'
+  # DNS validation below accepts ASCII only.
+  # shellcheck disable=SC2018,SC2019
+  normalized_domain=$(printf '%s' "$HOIST_DOMAIN" | tr 'A-Z' 'a-z')
+  if [ "$normalized_domain" != "$HOIST_DOMAIN" ]; then say "Lowercased HOIST_DOMAIN to $normalized_domain."; fi
+  HOIST_DOMAIN=$normalized_domain
   case "$HOIST_DOMAIN" in ''|*[!a-zA-Z0-9.-]*|.*|-*) fail 'Use a DNS base domain.' ;; esac
   case "$HOIST_ACME_EMAIL" in *[!a-zA-Z0-9.@_+-]*|'') fail 'Use a valid ACME email.' ;; *@*.*) ;; *) fail 'Use a valid ACME email.' ;; esac
 fi

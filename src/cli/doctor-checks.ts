@@ -5,7 +5,7 @@ import { isAbsolute, join } from "node:path";
 import { caddyRelease } from "../adapters/caddy-binary";
 import { Docker } from "../adapters/docker";
 import type { DockerClient } from "../adapters/interfaces";
-import { port } from "../adapters/validation";
+import { hostName, port } from "../adapters/validation";
 import { dashboardHost } from "../core/caddy-config";
 import { releaseHost } from "../core/previews";
 import { repairRepoHooks } from "../git/repository";
@@ -120,6 +120,13 @@ export function doctorChecks(
       await (await admin("/config/")).body?.cancel();
     },
     "TLS and ports": () => {
+      try {
+        hostName(dashboardHost());
+      } catch {
+        throw new Error(
+          "Set HOIST_DOMAIN and HOIST_DASHBOARD_HOST to valid lowercase DNS names.",
+        );
+      }
       const settings = caddySettings(root);
       const dashboard = Number(process.env.HOIST_DASHBOARD_PORT ?? 8700);
       port(dashboard);
@@ -187,7 +194,9 @@ export function doctorChecks(
       ];
       const tags = new Set(releases().map((r) => r.image));
       const orphans = images.filter((image) =>
-        image.RepoTags?.some((tag) => tag.startsWith("hoist/") && !tags.has(tag)),
+        image.RepoTags?.some(
+          (tag) => tag.startsWith("hoist/") && !tags.has(tag),
+        ),
       );
       requireCheck(
         !orphans.length,

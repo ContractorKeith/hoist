@@ -170,3 +170,19 @@ export async function checkInstalledFiles(
   );
   return authorized;
 }
+
+export async function checkDomainNormalization(name: string) {
+  const { inside, invoke } = installerCommands(name);
+  const result = await invoke([
+    "HOIST_DOMAIN=Example.COM",
+    "HOIST_ACME_EMAIL=owner@example.com",
+    "HOIST_LOCAL_BINARY=/local-hoist",
+    "HOIST_E2E=1",
+    "HOIST_DOCTOR_NO_SERVICE=1",
+  ]);
+  if (result.code) throw new Error(result.output);
+  expect(result.output).toContain("Lowercased HOIST_DOMAIN to example.com.");
+  expect((await inside("cat", "/etc/hoist/hoist.env")).stdout).toContain(
+    "HOIST_DOMAIN='example.com'",
+  );
+}
