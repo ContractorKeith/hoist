@@ -13,7 +13,7 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 M0–M5 done — 2026-11-01/02 (#9, #14, #19, #22, #20, #21): toolchain and harness; apps, SSH
 dispatch, builds and releases; cutover, Caddy supervisor, reconcile, SQLite leases; encrypted
 config, rollback, restart, retention; live and per-release logs; preview branches with
-post-receive teardown and a TTL sweeper. M6 (dashboard) in progress (draft PR pending). M7 installer remains.
+post-receive teardown and a TTL sweeper. M6 (dashboard) in progress ([draft PR #23](https://github.com/ContractorKeith/hoist/pull/23)). M7 installer remains.
 
 ## Commands
 
