@@ -6,6 +6,25 @@ import type { App, Preview, Release, Store } from "./interface";
 import { LockStore } from "./locks";
 import { migrations, schemaVersion } from "./migrations";
 
+export function databaseError(dataDir: string, error: unknown): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string } | null)?.code;
+  if (code === "SQLITE_NOTADB" || message.includes("file is not a database"))
+    return new Error(
+      `${join(dataDir, "hoist.db")} is not a SQLite database; restore it from your backup.`,
+      { cause: error },
+    );
+  if (
+    code?.startsWith("SQLITE_READONLY") ||
+    ["EACCES", "EROFS"].includes(code ?? "") ||
+    /readonly|read-only/i.test(message)
+  )
+    return new Error(`${dataDir} is read-only; fix its mode and owner.`, {
+      cause: error,
+    });
+  return error;
+}
+
 export class SqliteStore extends LockStore implements Store {
   readonly db: Database;
 
@@ -13,20 +32,21 @@ export class SqliteStore extends LockStore implements Store {
     super();
     if (!dataDir || dataDir.includes("\0"))
       throw new Error("Invalid data directory");
-    privatePath(dataDir, true, false, dataDir);
-    privatePath(join(dataDir, "hoist.db"), false, false, dataDir);
-    this.db = new Database(join(dataDir, "hoist.db"), {
-      create: true,
-      strict: true,
-    });
+    let opened: Database | undefined;
     try {
+      privatePath(dataDir, true, false, dataDir);
+      privatePath(join(dataDir, "hoist.db"), false, false, dataDir);
+      this.db = opened = new Database(join(dataDir, "hoist.db"), {
+        create: true,
+        strict: true,
+      });
       this.db.exec(
         "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;",
       );
       this.migrate();
     } catch (error) {
-      this.db.close();
-      throw error;
+      opened?.close();
+      throw databaseError(dataDir, error);
     }
   }
 
@@ -39,7 +59,9 @@ export class SqliteStore extends LockStore implements Store {
         if (!version) throw new Error("Missing schema version");
         const current = version.user_version;
         if (current > schemaVersion)
-          throw new Error("Database schema is newer than hoist");
+          throw new Error(
+            `Database schema version ${current} is newer than this hoist (${schemaVersion}); upgrade hoist.`,
+          );
         for (const [index, sql] of migrations.entries()) {
           if (index < current) continue;
           this.db.exec(sql);

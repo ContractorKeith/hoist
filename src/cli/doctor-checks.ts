@@ -11,7 +11,7 @@ import { releaseHost } from "../core/previews";
 import { repairRepoHooks } from "../git/repository";
 import { caddySettings } from "../server";
 import { DashboardStore } from "../store/dashboard";
-import type { SqliteStore } from "../store/sqlite";
+import { databaseError, type SqliteStore } from "../store/sqlite";
 
 export class ServiceUnavailable extends Error {}
 export type Check = () => unknown | Promise<unknown>;
@@ -93,15 +93,7 @@ export function doctorChecks(
       try {
         store().migrate();
       } catch (error) {
-        if (
-          error instanceof Error &&
-          (error.message.includes("file is not a database") ||
-            (error as { code?: string }).code === "SQLITE_NOTADB")
-        )
-          throw new Error(
-            `${join(root, "hoist.db")} is not a SQLite database; restore it from your backup.`,
-          );
-        throw error;
+        throw databaseError(root, error);
       }
     },
     "Secret key": async () => {
