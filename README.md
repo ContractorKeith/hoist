@@ -4,11 +4,18 @@ Push a Dockerfile to one Linux server. Hoist builds a numbered release, checks i
 health, then serves it over HTTPS with Caddy. A failed release leaves the current
 one serving. MIT licensed; one Bun executable, Docker, Git and pinned Caddy.
 
-## Install
+## Requirements
+
+One Docker daemon hosts exactly one hoist instance. A second `serve`, a lab beside
+the e2e suite, or the installer container shares that daemon and will delete the
+other instance's containers. Unique app names and ports provide no isolation.
+Stop other instances before running e2e; its daemon lock is mandatory.
 
 Use a fresh Ubuntu 24.04 or Debian 12 server (x64 or arm64), with ports 22, 80 and
 443 open. Point `*.example.com` and `*.hello.example.com` at its IP; previews need
 the second wildcard. Hoist assumes this server's Docker daemon belongs to hoist.
+
+## Install
 
 Download and inspect the versioned installer, then run as root:
 
