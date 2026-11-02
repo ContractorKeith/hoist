@@ -7,6 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
+import { appName, branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 
 export async function git(
@@ -45,12 +46,15 @@ export async function createRepo(root: string, name: string): Promise<void> {
   privatePath(repo, true, true, root);
   try {
     await git(["init", "--bare", "--initial-branch=main", repo]);
-    await writeFile(
-      join(repo, "hooks/pre-receive"),
-      `#!/bin/sh\nexec ${executableCommand()} git-hook pre-receive ${shellQuote(name)}\n`,
-      { mode: 0o700 },
-    );
-    await chmod(join(repo, "hooks/pre-receive"), 0o700);
+    for (const hook of ["pre-receive", "post-receive"]) {
+      const path = join(repo, "hooks", hook);
+      await writeFile(
+        path,
+        `#!/bin/sh\nexec ${executableCommand()} git-hook ${hook} ${shellQuote(name)}\n`,
+        { mode: 0o700 },
+      );
+      await chmod(path, 0o700);
+    }
   } catch (error) {
     await rm(repo, { recursive: true, force: true });
     throw error;
@@ -130,3 +134,19 @@ export const gitRefs = {
       true,
     )) || null,
 };
+
+export async function deleteBranch(
+  root: string,
+  app: string,
+  branch: string,
+): Promise<void> {
+  appName(app);
+  branchSlug(branch);
+  await git([
+    "--git-dir",
+    join(root, "repos", `${app}.git`),
+    "update-ref",
+    "-d",
+    `refs/heads/${branch}`,
+  ]);
+}

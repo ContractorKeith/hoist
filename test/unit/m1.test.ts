@@ -107,17 +107,19 @@ test("SSH dispatch accepts only one app component and never shell syntax", () =>
     expect(() => parseCli(args)).toThrow();
 });
 
-test("hook refs validate SHAs, ignore tags and deletes, and reject slug collisions", () => {
+test("hook refs validate SHAs and branch names, ignore tags and retain deletes", () => {
   expect(
     parseRefs(
       `${zero} ${sha} refs/heads/main\n${sha} ${zero} refs/heads/old\n${zero} ${sha} refs/tags/v1\n`,
     ),
-  ).toEqual([{ oldSha: zero, sha, branch: "main" }]);
+  ).toEqual([
+    { oldSha: zero, sha, branch: "main" },
+    { oldSha: sha, sha: zero, branch: "old" },
+  ]);
   for (const value of [
     "bad\n",
     `${zero} nope refs/heads/main`,
     `${zero} ${sha} refs/heads/../bad`,
-    `${zero} ${sha} refs/heads/feature/x\n${zero} ${sha} refs/heads/feature-x`,
     "a".repeat(1048577),
   ])
     expect(() => parseRefs(value)).toThrow();
@@ -344,39 +346,25 @@ test("repeated SHAs keep distinct immutable image tags across releases and branc
   expect(new Set([one.image, two.image, other.image]).size).toBe(3);
 });
 
-test("receive fails and cleans every reserved release when the second ref cannot prepare", async () => {
-  const root = await mkdtemp(join(tmpdir(), "hoist-push-"));
+test("receive refuses multiple branch updates before reserving or building", async () => {
   const store = new FakeStore(),
     docker = new FakeDocker();
   const app = store.createApp("hello", "hello.test", "/");
-  const error = new Error("second checkout failed");
-  let prepared = 0;
-  try {
-    await writeFile(join(root, "Dockerfile"), "FROM scratch\n");
-    await expect(
-      receive(
-        root,
-        store,
-        docker,
-        app,
-        `${zero} ${sha} refs/heads/main\n${zero} ${sha} refs/heads/feature-x\n`,
-        new AbortController().signal,
-        { caddy: new FakeCaddy(), health: async () => {} },
-        async () => {
-          if (++prepared === 2) throw error;
-          return { path: root, cleanup: async () => {} };
-        },
-        { objectType: async () => "commit", head: async () => null },
-      ),
-    ).rejects.toBe(error);
-    expect(store.rows.map((row) => row.status)).toEqual(["failed", "failed"]);
-    expect(docker.images.size).toBe(0);
-    expect(
-      docker.calls.filter((call) => call.method === "buildImage"),
-    ).toHaveLength(1);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+  await expect(
+    receive(
+      "/unused",
+      store,
+      docker,
+      app,
+      `${zero} ${sha} refs/heads/main\n${zero} ${sha} refs/heads/zbad\n`,
+      new AbortController().signal,
+      { caddy: new FakeCaddy(), health: async () => {} },
+    ),
+  ).rejects.toThrow(
+    "hoist deploys one branch per push; push main and zbad separately",
+  );
+  expect(store.rows).toEqual([]);
+  expect(docker.calls).toEqual([]);
 });
 
 test("cleanup continues after removeImage fails and preserves the original build error", async () => {
@@ -461,16 +449,13 @@ test("mid-stream abort fails the release, logs the error and removes its partial
   expect(docker.images.has(row.image)).toBe(false);
 });
 
-test("tag-only and delete-only pushes explain that nothing was built", async () => {
+test("tag-only pushes explain nothing built and main deletes are refused", async () => {
   const store = new FakeStore(),
     docker = new FakeDocker();
   const app = store.createApp("hello", "hello.test", "/");
   const stderr = spyOn(console, "error").mockImplementation(() => {});
   try {
-    for (const input of [
-      `${zero} ${sha} refs/tags/v1\n`,
-      `${sha} ${zero} refs/heads/main\n`,
-    ]) {
+    for (const input of [`${zero} ${sha} refs/tags/v1\n`]) {
       await receive(
         "/unused",
         store,
@@ -483,8 +468,18 @@ test("tag-only and delete-only pushes explain that nothing was built", async () 
     }
     expect(stderr.mock.calls).toEqual([
       ["hoist: no branch refs in this push; nothing built"],
-      ["hoist: no branch refs in this push; nothing built"],
     ]);
+    await expect(
+      receive(
+        "/unused",
+        store,
+        docker,
+        app,
+        `${sha} ${zero} refs/heads/main\n`,
+        new AbortController().signal,
+        { caddy: new FakeCaddy(), health: async () => {} },
+      ),
+    ).rejects.toThrow("main branch");
     expect(store.rows).toEqual([]);
     expect(docker.calls).toEqual([]);
   } finally {

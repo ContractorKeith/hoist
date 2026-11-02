@@ -6,6 +6,7 @@ import type {
 import type { Store } from "../store/interface";
 import { removeImages } from "./build";
 import { type HealthCheck, ownsContainer, recoverLive } from "./cutover";
+import { releaseHost } from "./previews";
 
 export async function reconcile(
   store: Store,
@@ -23,13 +24,15 @@ export async function reconcile(
     errors.push(message);
     report(message);
   };
-  for (const app of store.apps()) {
+  for (const candidate of store.apps()) {
     if (signal?.aborted) break;
     try {
       await locks.withLock(
-        app.name,
+        candidate.name,
         async () => {
           if (signal?.aborted) return;
+          const app = store.app(candidate.name);
+          if (!app) return;
           for (const release of store.releases(app.id)) {
             if (signal?.aborted) return;
             try {
@@ -59,13 +62,14 @@ export async function reconcile(
                   release,
                   health,
                   report,
+                  releaseHost(app, release.branch),
                 );
             } catch (error) {
               record(`${app.name} release ${release.id}`, error);
             }
           }
           // Update only this app, while its lease excludes a concurrent cutover.
-          let upstream: string | undefined;
+          const routes = new Map<string, string>();
           for (const release of store
             .releases(app.id)
             .filter((row) => row.status === "live")
@@ -78,18 +82,29 @@ export async function reconcile(
                 container?.running &&
                 ownsContainer(container, app, release)
               ) {
-                upstream = `127.0.0.1:${container.port}`;
-                break;
+                const host = releaseHost(app, release.branch);
+                if (!routes.has(host))
+                  routes.set(host, `127.0.0.1:${container.port}`);
               }
             } catch (error) {
               record(`${app.name} route ${release.id}`, error);
             }
           }
-          try {
-            if (upstream) await caddy.upsertRoute(app.domain, upstream);
-            else await caddy.removeRoute(app.domain);
-          } catch (error) {
-            record(`${app.name} route`, error);
+          const hosts = new Set([
+            app.domain,
+            ...store
+              .previews(app.id)
+              .map((row) => releaseHost(app, row.branch)),
+            ...routes.keys(),
+          ]);
+          for (const host of hosts) {
+            try {
+              const upstream = routes.get(host);
+              if (upstream) await caddy.upsertRoute(host, upstream);
+              else await caddy.removeRoute(host);
+            } catch (error) {
+              record(`${app.name} route ${host}`, error);
+            }
           }
           const releases = store.releases(app.id);
           for (const container of await docker.listContainers({
@@ -124,7 +139,7 @@ export async function reconcile(
       );
     } catch (error) {
       if (signal?.aborted) break;
-      record(app.name, error);
+      record(candidate.name, error);
     }
   }
   if (signal?.aborted) return errors;

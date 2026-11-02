@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { version } from "../../package.json";
+import { SqliteAppLocks } from "../adapters/app-lock";
 import { Caddy } from "../adapters/caddy";
 import { Docker } from "../adapters/docker";
 import { checkHealth } from "../adapters/health";
@@ -8,12 +9,17 @@ import { appName } from "../core/validation";
 import { dataRoot } from "../data";
 import { parseDispatch } from "../git/dispatch";
 import { receive } from "../git/hook";
+import { receiveDeleted } from "../git/post-receive";
 import { caddySettings, serve } from "../server";
 import { SqliteStore } from "../store/sqlite";
 import { appsCommand, appsSet, parseCli } from "./apps";
 import { configCommand } from "./config";
 import { logsCommand } from "./logs";
+import { previewsCommand } from "./previews";
 import { releasesCommand } from "./releases";
+
+// Compare recreation against process start, before delay or lease acquisition.
+const hookStartedAt = performance.timeOrigin;
 
 const commands: Record<
   string,
@@ -35,6 +41,8 @@ const commands: Record<
   "apps:info": appsCommand,
   "apps:destroy": appsCommand,
   "apps:set": (_root, store, args) => appsSet(store, args),
+  "previews:list": previewsCommand,
+  "previews:destroy": previewsCommand,
 };
 
 export { parseCli } from "./apps";
@@ -67,7 +75,7 @@ export async function run(args: string[]): Promise<number> {
     }
     if (
       args[0] === "git-hook" &&
-      args[1] === "pre-receive" &&
+      ["pre-receive", "post-receive"].includes(args[1] ?? "") &&
       args.length === 3
     ) {
       const name = appName(args[2] ?? "");
@@ -90,18 +98,35 @@ export async function run(args: string[]): Promise<number> {
           if (length > 1024 * 1024) throw new Error("Ref input too large");
           chunks.push(chunk);
         }
-        await receive(
-          root,
-          store,
-          new Docker(),
-          app,
-          new TextDecoder().decode(Buffer.concat(chunks)),
-          controller.signal,
-          {
-            caddy: new Caddy(caddySettings(root).adminPort),
+        const input = new TextDecoder().decode(Buffer.concat(chunks));
+        const docker = new Docker(),
+          caddy = new Caddy(caddySettings(root).adminPort);
+        if (args[1] === "post-receive" && process.env.HOIST_E2E !== undefined) {
+          const delay = Number(process.env.HOIST_TEST_HOOK_DELAY_MS ?? 0);
+          if (!Number.isInteger(delay) || delay < 0 || delay > 60000)
+            throw new Error("Invalid test hook delay");
+          if (delay) {
+            console.error("hoist: delaying post-receive for race test");
+            await Bun.sleep(delay);
+          }
+        }
+        if (args[1] === "post-receive")
+          await receiveDeleted(
+            root,
+            store,
+            docker,
+            caddy,
+            new SqliteAppLocks(store),
+            app,
+            input,
+            controller.signal,
+            hookStartedAt,
+          );
+        else
+          await receive(root, store, docker, app, input, controller.signal, {
+            caddy,
             health: checkHealth,
-          },
-        );
+          });
       } finally {
         process.off("SIGTERM", abort);
         process.off("SIGHUP", disconnected);

@@ -33,6 +33,7 @@ export async function prune(
   app: App,
   removeLogs: (release: Release) => Promise<void>,
   log: (message: string) => Promise<void> = async () => {},
+  branch?: string,
 ): Promise<void> {
   const report = async (path: string, error: unknown) => {
     const actualPath = (error as { path?: string } | null)?.path ?? path;
@@ -55,7 +56,9 @@ export async function prune(
   try {
     const rows = store.releases(app.id);
     const selected = retentionSelection(
-      rows,
+      branch === undefined
+        ? rows
+        : rows.filter((row) => branchSlug(row.branch) === branchSlug(branch)),
       store.app(app.name)?.retention ?? 5,
     );
     const ids = new Set(selected.map((row) => row.id));

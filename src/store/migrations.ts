@@ -67,6 +67,22 @@ export const migrations = [
     child_pid INTEGER
   );`,
   `ALTER TABLE releases ADD COLUMN pruned_at TEXT;`,
+  `ALTER TABLE apps ADD COLUMN main_branch TEXT;
+  WITH RECURSIVE chars(app_id, branch, pos, slug) AS (
+    SELECT DISTINCT app_id, branch, 1, '' FROM releases WHERE branch <> 'main'
+    UNION ALL
+    SELECT app_id, branch, pos + 1, slug ||
+      CASE WHEN lower(substr(branch, pos, 1)) GLOB '[a-z0-9-]'
+        THEN lower(substr(branch, pos, 1)) ELSE '-' END
+      FROM chars WHERE pos <= length(branch)
+  ), collapsed(app_id, branch, slug) AS (
+    SELECT app_id, branch, slug FROM chars WHERE pos = length(branch) + 1
+    UNION ALL
+    SELECT app_id, branch, replace(slug, '--', '-') FROM collapsed WHERE instr(slug, '--') > 0
+  )
+  INSERT OR IGNORE INTO previews(app_id, branch, slug, last_push_at)
+    SELECT app_id, branch, trim(slug, '-'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    FROM collapsed WHERE instr(slug, '--') = 0;`,
 ] as const;
 
 export const schemaVersion = migrations.length;

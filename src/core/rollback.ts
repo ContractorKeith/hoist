@@ -2,8 +2,12 @@ import type { DockerClient } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
 import { nextReleaseNumber } from "./releases";
 
-export function rollbackTarget(rows: Release[], target?: string): Release {
-  const main = rows.filter((row) => row.branch === "main");
+export function rollbackTarget(
+  rows: Release[],
+  target?: string,
+  branch = "main",
+): Release {
+  const main = rows.filter((row) => row.branch === branch);
   const live = main.findLast((row) => row.status === "live");
   if (!live) throw new Error("App has no live main release.");
   if (target !== undefined && !/^v[1-9][0-9]*$/.test(target))
@@ -33,10 +37,11 @@ export async function copyRelease(
   restart: boolean,
   target?: string,
 ): Promise<Release> {
+  const branch = app.main_branch ?? "main";
   const rows = store.releases(app.id);
   const source = restart
-    ? rows.findLast((row) => row.branch === "main" && row.status === "live")
-    : rollbackTarget(rows, target);
+    ? rows.findLast((row) => row.branch === branch && row.status === "live")
+    : rollbackTarget(rows, target, branch);
   if (!source) throw new Error("App has no live main release.");
   try {
     await docker.imagePorts(source.image);
@@ -53,8 +58,8 @@ export async function copyRelease(
   return store.transaction(() =>
     store.insertRelease({
       app_id: app.id,
-      branch: "main",
-      number: nextReleaseNumber(store, app.id, "main"),
+      branch,
+      number: nextReleaseNumber(store, app.id, branch),
       git_sha: source.git_sha,
       image: source.image,
       config_json: restart

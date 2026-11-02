@@ -41,8 +41,8 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - `HOIST_DIR` (default `/var/lib/hoist`) holds the private database, bare repos, temporary checkouts and release logs; `HOIST_DOMAIN` supplies the default base domain until M7.
 - Docker containers use `Tty: true`: logs are plain bytes with CRLF line endings and stderr merged into stdout; M4 strips `\r`.
 - `logs` reads runtime bytes from the Docker API with `\r` stripped; `--release vN` reads the per-release `build.log` file.
-- The generated pre-receive hook hard-codes the executable path at `apps:create` time; M7 `doctor` will rewrite hooks.
-- Bare repos install a tiny executable `pre-receive` hook that execs `hoist git-hook pre-receive <app>`; pushed values never reach a shell.
+- Both generated Git hooks hard-code the executable path at `apps:create` time; M7 `doctor` must rewrite both pre-receive and post-receive hooks.
+- Bare repos install executable pre-receive (build/cutover and main-delete refusal) and post-receive (committed preview deletions) hooks; pushed values never reach a shell.
 - On Omarchy, a shell missing the Docker group must run socket commands via `newgrp docker` on stdin; CI needs no wrapper.
 - `src/core` depends only on the `DockerClient`, `CaddyAdmin` and `Store` interfaces and is
   tested on fakes. Adapters are thin and covered by e2e only.
@@ -72,6 +72,9 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
   Rollback checks image existence, since a pruned row can share a retained image.
   Prune is best effort after cutover: warn per failed cleanup in the new release log and
   stderr, preserve the successful cutover/push, and continue with the remaining releases.
+- Preview hosts use `<branch-slug>.<app.domain>`; `apps:set <app> branch=<name>` selects the bare-domain branch (default main).
+- Preview TTL defaults to 7 idle days; `HOIST_PREVIEW_TTL_DAYS` accepts 1..365.
+- The preview sweeper starts after 60 s, then runs hourly under app leases; `HOIST_SWEEP_INTERVAL_MS` overrides both delays (min 1000).
 - One process. Caddy is a supervised child; the preview sweeper is a timer. No queue.
 - A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
   change during cutover. Delete is governed by retention (M3).

@@ -6,8 +6,8 @@ import type { App, Store } from "../store/interface";
 
 const usage =
   "Usage: hoist logs <app> [-f] [-n <lines>] [--release vN] [--branch <b>]";
-export function defaultBranch(_app?: App): string {
-  return "main";
+export function defaultBranch(app?: App): string {
+  return app?.main_branch ?? "main";
 }
 
 export function parseLogs(args: string[], app?: App) {
