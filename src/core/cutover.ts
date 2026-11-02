@@ -37,6 +37,7 @@ async function startHealthy(
   release: Release,
   health: HealthCheck,
   log: Log,
+  host: string,
 ): Promise<string> {
   let id: string | undefined;
   try {
@@ -64,7 +65,7 @@ async function startHealthy(
     await health(container.port, app.health_path);
     await log("Health check passed (HTTP 2xx)");
     await log("Swapping Caddy upstream");
-    await caddy.upsertRoute(app.domain, `127.0.0.1:${container.port}`);
+    await caddy.upsertRoute(host, `127.0.0.1:${container.port}`);
     return id;
   } catch (error) {
     if (id) {
@@ -85,6 +86,7 @@ export async function cutover(
   head: () => Promise<string | null>,
   health: HealthCheck,
   log: Log = async () => {},
+  host = app.domain,
 ): Promise<void> {
   if (release.status !== "built")
     throw new Error("Cutover requires a built release");
@@ -98,7 +100,16 @@ export async function cutover(
   }
   let id: string;
   try {
-    id = await startHealthy(store, docker, caddy, app, release, health, log);
+    id = await startHealthy(
+      store,
+      docker,
+      caddy,
+      app,
+      release,
+      health,
+      log,
+      host,
+    );
   } catch (error) {
     store.failRelease(release.id);
     await log(error instanceof Error ? error.message : String(error)).catch(
@@ -129,7 +140,7 @@ export async function cutover(
     for (const row of old) store.setReleaseState(row.id, "stopped");
     store.setReleaseState(release.id, "live", id);
   });
-  await log(`Live: https://${app.domain}`);
+  await log(`Live: https://${host}`);
 }
 
 export async function recoverLive(
@@ -140,6 +151,7 @@ export async function recoverLive(
   release: Release,
   health: HealthCheck,
   report: (message: string) => void = console.error,
+  host = app.domain,
 ): Promise<void> {
   if (release.status !== "live")
     throw new Error("Recovery requires a live release");
@@ -158,6 +170,7 @@ export async function recoverLive(
     release,
     health,
     async () => {},
+    host,
   );
   store.setReleaseState(release.id, "live", id, "live");
   // Recovery never stops the old container: it was missing or stopped already.

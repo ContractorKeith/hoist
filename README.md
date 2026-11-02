@@ -174,7 +174,41 @@ Build records are decoded to plain text before saving. The pusher-facing copy es
 NUL bytes as `\0` because Git sideband truncates at NUL. Saved files retain the bytes;
 `logs` passes NUL bytes through unchanged. Interrupting saved-file output exits 130
 for SIGINT or 143 for SIGTERM, including when stdout is blocked.
-It cannot be combined with `-f` or `-n`. The branch defaults to `main`.
+It cannot be combined with `-f` or `-n`. The branch defaults to the app's configured main branch (`main` by default).
+
+## Preview branches
+
+Push any branch other than the app's main branch to serve it at
+`<branch-slug>.<app.domain>`. For example, `git push hoist feature-x` serves
+`feature-x.hello.example.com` while the main release keeps serving
+`hello.example.com`. Branch names are lowercased, punctuation becomes dashes,
+and duplicate slugs are refused with the existing branch's name. DNS labels
+must fit 63 characters and the complete host must fit 253 characters.
+
+The main branch defaults to `main`; change it with
+`hoist apps:set hello branch=master`. Existing release chains are reclassified
+and their routes updated. Newly converted previews start a fresh TTL window.
+Each preview snapshots the app's current config and keeps the configured number
+of releases in its own branch chain. Logs, rollback and restart default to the
+configured main branch.
+
+```bash
+hoist previews:list hello --json
+hoist releases hello --branch feature-x --json
+git push hoist :feature-x
+hoist previews:destroy hello feature-x
+```
+
+Branch-delete teardown runs in post-receive, after Git commits the ref deletion.
+Both teardown commands mark releases stopped, then remove the preview's
+containers, route, images, logs and release rows. The explicit command accepts a branch name or its listed slug;
+it keeps the Git branch in the bare repository. The main branch cannot be
+deleted as a preview.
+
+Previews expire after 7 days without a push. `HOIST_PREVIEW_TTL_DAYS` overrides
+this with an integer from 1 to 365. The sweeper first runs 60 seconds after boot,
+then hourly inside `hoist serve`, holding the same app lease as pushes.
+`HOIST_SWEEP_INTERVAL_MS` overrides both delays for testing (minimum 1000 ms).
 
 ## Development
 

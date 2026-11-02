@@ -84,7 +84,7 @@ async function startSSH(executable?: string) {
     number,
     number,
   ];
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOIST_DIR: data,
     HOIST_DOMAIN: "example.test",

@@ -10,42 +10,16 @@ import {
 import { buildLogDecoder, releaseLogSink } from "../core/build-logs";
 import { cutover, type HealthCheck } from "../core/cutover";
 import { removeReleaseLogs } from "../core/logs";
+import { releaseHost } from "../core/previews";
 import { prune } from "../core/retention";
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 import type { App, Release, Store } from "../store/interface";
 import { checkout, gitRefs, requireDockerfile } from "./repository";
 
-export function parseRefs(
-  input: string,
-): { oldSha: string; sha: string; branch: string }[] {
-  if (input.length > 1024 * 1024 || input.includes("\0"))
-    throw new Error("Invalid ref input");
-  const refs: { oldSha: string; sha: string; branch: string }[] = [];
-  const slugs = new Set<string>();
-  for (const line of input.split("\n")) {
-    if (!line) continue;
-    const match = /^([a-f0-9]{40}) ([a-f0-9]{40}) (refs\/[^ ]{1,220})$/.exec(
-      line,
-    );
-    if (
-      !match ||
-      [...line].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
-    )
-      throw new Error("Invalid pre-receive ref line");
-    if (
-      !(match[3] ?? "").startsWith("refs/heads/") ||
-      /^0+$/.test(match[2] ?? "")
-    )
-      continue;
-    const branch = (match[3] ?? "").slice(11);
-    const slug = branchSlug(branch);
-    if (slugs.has(slug)) throw new Error("Branch slug collision in push");
-    slugs.add(slug);
-    refs.push({ oldSha: match[1] ?? "", sha: match[2] ?? "", branch });
-  }
-  return refs;
-}
+export { parseRefs } from "./refs";
+
+import { parseRefs } from "./refs";
 
 export async function receive(
   ...args: Parameters<typeof receiveLocked>
@@ -70,7 +44,15 @@ async function receiveLocked(
   prepare: typeof checkout = checkout,
   refsClient: typeof gitRefs = gitRefs,
 ): Promise<void> {
+  app = store.app(app.name) ?? app;
   const refs = parseRefs(input);
+  if (
+    refs.some(
+      (ref) =>
+        /^0+$/.test(ref.sha) && ref.branch === (app.main_branch ?? "main"),
+    )
+  )
+    throw new Error("The main branch cannot be deleted.");
   if (!refs.length) {
     console.error("hoist: no branch refs in this push; nothing built");
     return;
@@ -79,6 +61,7 @@ async function receiveLocked(
   const repo = join(root, "repos", `${app.name}.git`);
   try {
     for (const { oldSha, sha, branch } of refs) {
+      if (/^0+$/.test(sha)) continue;
       if ((await refsClient.objectType(repo, sha)) !== "commit")
         throw new Error("pushed object is not a commit");
       const release = reserveRelease(store, app, branch, sha);
@@ -149,8 +132,6 @@ async function receiveLocked(
     }
     // Finish every build before any cutover, so a bad second ref cannot leave the first live.
     for (const release of reserved) {
-      // TODO M5: non-main branches gain preview hosts and their own cutover.
-      if (release.branch !== "main") continue;
       const built = store.releases(app.id).find((row) => row.id === release.id);
       const ref = refs.find((row) => row.branch === release.branch);
       if (!built || !ref) throw new Error("Release disappeared before cutover");
@@ -186,6 +167,7 @@ async function receiveLocked(
             const chunk = new TextEncoder().encode(`${message}\n`);
             await log(chunk);
           },
+          releaseHost(app, release.branch),
         );
         await prune(
           store,
@@ -196,6 +178,7 @@ async function receiveLocked(
           async (message) => {
             await logFile.writeFile(`${message}\n`);
           },
+          release.branch,
         );
       } finally {
         await logFile.close();

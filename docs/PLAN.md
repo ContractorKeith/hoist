@@ -117,7 +117,7 @@ Rules that hold the shape:
 ## 6. Data model
 
 ```
-apps        id, name (unique), domain, health_path, retention, created_at
+apps        id, name (unique), domain, health_path, retention, main_branch (nullable; default main), created_at
 releases    id, app_id, branch, number, git_sha, image, config_json (encrypted), status
             (building|built|live|stopped|failed), container_id, created_at, pruned_at (nullable)
 config      app_id, key, value (encrypted)       -- current config; snapshotted into releases

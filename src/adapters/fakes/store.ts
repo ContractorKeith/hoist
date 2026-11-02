@@ -2,6 +2,7 @@ import type {
   App,
   LockClaim,
   LockRow,
+  Preview,
   Release,
   Store,
 } from "../../store/interface";
@@ -34,6 +35,37 @@ export class FakeStore implements Store {
   markPruned(id: number): void {
     const row = this.rows.find((r) => r.id === id);
     if (row) row.pruned_at = new Date().toISOString();
+  }
+  readonly previewRows: Preview[] = [];
+  setMainBranch(appId: number, branch: string): void {
+    const app = this.appRows.find((a) => a.id === appId);
+    if (app) app.main_branch = branch;
+  }
+  removePreview(appId: number, branch: string): void {
+    const index = this.previewRows.findIndex(
+      (p) => p.app_id === appId && p.branch === branch,
+    );
+    if (index >= 0) this.previewRows.splice(index, 1);
+  }
+  stopBranchReleases(appId: number, branch: string): void {
+    for (const row of this.releases(appId))
+      if (row.branch === branch) row.status = "stopped";
+  }
+  previews(appId: number): Preview[] {
+    return structuredClone(this.previewRows.filter((p) => p.app_id === appId));
+  }
+  upsertPreview(input: Preview): void {
+    const row = this.previewRows.find(
+      (p) => p.app_id === input.app_id && p.branch === input.branch,
+    );
+    if (row) Object.assign(row, input);
+    else this.previewRows.push({ ...input });
+  }
+  deletePreview(appId: number, branch: string): void {
+    for (const rows of [this.rows, this.previewRows])
+      for (let i = rows.length - 1; i >= 0; i--)
+        if (rows[i]?.app_id === appId && rows[i]?.branch === branch)
+          rows.splice(i, 1);
   }
   readonly lockRows = new Map<string, LockRow>();
   lock(name: string): LockRow | null {
@@ -97,10 +129,12 @@ export class FakeStore implements Store {
     [];
   transaction<T>(action: () => T): T {
     const snapshot = structuredClone(this.rows);
+    const previews = structuredClone(this.previewRows);
     try {
       return action();
     } catch (error) {
       this.rows.splice(0, this.rows.length, ...snapshot);
+      this.previewRows.splice(0, this.previewRows.length, ...previews);
       throw error;
     }
   }
@@ -129,6 +163,7 @@ export class FakeStore implements Store {
     return structuredClone(this.appRows);
   }
   deleteApp(id: number): void {
+    for (const row of this.previews(id)) this.deletePreview(id, row.branch);
     this.appRows.splice(
       0,
       this.appRows.length,

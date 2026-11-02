@@ -107,12 +107,15 @@ test("SSH dispatch accepts only one app component and never shell syntax", () =>
     expect(() => parseCli(args)).toThrow();
 });
 
-test("hook refs validate SHAs, ignore tags and deletes, and reject slug collisions", () => {
+test("hook refs validate SHAs, ignore tags and retain deletes, and reject slug collisions", () => {
   expect(
     parseRefs(
       `${zero} ${sha} refs/heads/main\n${sha} ${zero} refs/heads/old\n${zero} ${sha} refs/tags/v1\n`,
     ),
-  ).toEqual([{ oldSha: zero, sha, branch: "main" }]);
+  ).toEqual([
+    { oldSha: zero, sha, branch: "main" },
+    { oldSha: sha, sha: zero, branch: "old" },
+  ]);
   for (const value of [
     "bad\n",
     `${zero} nope refs/heads/main`,
@@ -461,16 +464,13 @@ test("mid-stream abort fails the release, logs the error and removes its partial
   expect(docker.images.has(row.image)).toBe(false);
 });
 
-test("tag-only and delete-only pushes explain that nothing was built", async () => {
+test("tag-only pushes explain nothing built and main deletes are refused", async () => {
   const store = new FakeStore(),
     docker = new FakeDocker();
   const app = store.createApp("hello", "hello.test", "/");
   const stderr = spyOn(console, "error").mockImplementation(() => {});
   try {
-    for (const input of [
-      `${zero} ${sha} refs/tags/v1\n`,
-      `${sha} ${zero} refs/heads/main\n`,
-    ]) {
+    for (const input of [`${zero} ${sha} refs/tags/v1\n`]) {
       await receive(
         "/unused",
         store,
@@ -483,8 +483,18 @@ test("tag-only and delete-only pushes explain that nothing was built", async () 
     }
     expect(stderr.mock.calls).toEqual([
       ["hoist: no branch refs in this push; nothing built"],
-      ["hoist: no branch refs in this push; nothing built"],
     ]);
+    await expect(
+      receive(
+        "/unused",
+        store,
+        docker,
+        app,
+        `${sha} ${zero} refs/heads/main\n`,
+        new AbortController().signal,
+        { caddy: new FakeCaddy(), health: async () => {} },
+      ),
+    ).rejects.toThrow("main branch");
     expect(store.rows).toEqual([]);
     expect(docker.calls).toEqual([]);
   } finally {

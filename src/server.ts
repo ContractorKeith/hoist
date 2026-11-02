@@ -14,8 +14,10 @@ import {
   type ReleaseRoute,
 } from "./core/caddy-config";
 import { ownsContainer } from "./core/cutover";
+import { previewTTL, releaseHost, sweepPreviews } from "./core/previews";
 import { reconcile } from "./core/reconcile";
 import { dataRoot, privatePath } from "./data";
+import { finishSupervisor, scheduleSweep } from "./preview-timer";
 import { SqliteStore } from "./store/sqlite";
 
 export function caddySettings(root: string): CaddySettings {
@@ -45,6 +47,7 @@ export function caddySettings(root: string): CaddySettings {
 }
 
 export async function serve(): Promise<void> {
+  const ttl = previewTTL();
   const startedAt = new Date().toISOString();
   const root = dataRoot(),
     settings = caddySettings(root);
@@ -57,6 +60,19 @@ export async function serve(): Promise<void> {
   let stopping = false;
   let stoppingChild: Promise<void> | undefined;
   let child: ReturnType<typeof Bun.spawn> | undefined;
+  const sweeper = scheduleSweep(() =>
+    sweepPreviews(
+      root,
+      store,
+      docker,
+      caddy,
+      locks,
+      Date.now(),
+      ttl,
+      console.error,
+      shutdown.signal,
+    ),
+  );
   let wake: (() => void) | undefined;
   const stop = () => {
     stopping = true;
@@ -101,7 +117,7 @@ export async function serve(): Promise<void> {
                 : null;
               if (info?.running && ownsContainer(info, app, release))
                 routes.push({
-                  host: app.domain,
+                  host: releaseHost(app, release.branch),
                   upstream: `127.0.0.1:${info.port}`,
                   releaseId: release.id,
                 });
@@ -177,6 +193,7 @@ export async function serve(): Promise<void> {
             shutdown.signal,
           );
           boot = false;
+          sweeper.start();
         }
         if (!stopping) console.error("hoist serve ready");
       }
@@ -211,10 +228,17 @@ export async function serve(): Promise<void> {
   } catch (error) {
     if (!stopping) throw error;
   } finally {
-    if (child) {
-      await (stoppingChild ?? stopChild(child));
-      lease?.setChild(null);
-    }
+    stopping = true;
+    shutdown.abort();
+    await finishSupervisor(
+      () => sweeper.cancel(),
+      async () => {
+        if (child) await (stoppingChild ?? stopChild(child));
+      },
+      () => {
+        if (child) lease?.setChild(null);
+      },
+    );
     lease?.release();
     process.off("SIGTERM", stop);
     process.off("SIGINT", stop);

@@ -2,13 +2,15 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { keyfile, verifyKeyfile } from "../adapters/keyfile";
 import { privatePath } from "../data";
-import type { App, LockClaim, LockRow, Release, Store } from "./interface";
+import type { App, Preview, Release, Store } from "./interface";
+import { LockStore } from "./locks";
 import { migrations, schemaVersion } from "./migrations";
 
-export class SqliteStore implements Store {
+export class SqliteStore extends LockStore implements Store {
   readonly db: Database;
 
   constructor(readonly dataDir: string) {
+    super();
     if (!dataDir || dataDir.includes("\0"))
       throw new Error("Invalid data directory");
     privatePath(dataDir, true, false, dataDir);
@@ -107,6 +109,49 @@ export class SqliteStore implements Store {
       [id],
     );
   }
+  setMainBranch(appId: number, branch: string): void {
+    this.db.run("UPDATE apps SET main_branch = ? WHERE id = ?", [
+      branch,
+      appId,
+    ]);
+  }
+  removePreview(appId: number, branch: string): void {
+    this.db.run("DELETE FROM previews WHERE app_id = ? AND branch = ?", [
+      appId,
+      branch,
+    ]);
+  }
+  stopBranchReleases(appId: number, branch: string): void {
+    this.db.run(
+      "UPDATE releases SET status = 'stopped' WHERE app_id = ? AND branch = ?",
+      [appId, branch],
+    );
+  }
+  previews(appId: number): Preview[] {
+    return this.db
+      .query<Preview, [number]>(
+        "SELECT * FROM previews WHERE app_id = ? ORDER BY branch",
+      )
+      .all(appId);
+  }
+  upsertPreview(input: Preview): void {
+    this.db.run(
+      "INSERT INTO previews (app_id, branch, slug, last_push_at) VALUES (?, ?, ?, ?) ON CONFLICT(app_id, branch) DO UPDATE SET last_push_at = excluded.last_push_at",
+      [input.app_id, input.branch, input.slug, input.last_push_at],
+    );
+  }
+  deletePreview(appId: number, branch: string): void {
+    this.transaction(() => {
+      this.db.run("DELETE FROM releases WHERE app_id = ? AND branch = ?", [
+        appId,
+        branch,
+      ]);
+      this.db.run("DELETE FROM previews WHERE app_id = ? AND branch = ?", [
+        appId,
+        branch,
+      ]);
+    });
+  }
   latestReleaseNumber(appId: number, branch: string): number {
     return (
       this.db
@@ -191,66 +236,6 @@ export class SqliteStore implements Store {
       [status, containerId, id, expectedStatus],
     );
     if (!result.changes) throw new Error(`release ${id} no longer exists`);
-  }
-
-  lock(name: string): LockRow | null {
-    return this.db
-      .query<LockRow, [string]>("SELECT * FROM locks WHERE name = ?")
-      .get(name);
-  }
-  acquireLock(
-    name: string,
-    pid: number,
-    now: string,
-    alive: (pid: number) => boolean,
-  ): LockClaim {
-    return this.transaction(() => {
-      const previous = this.lock(name);
-      if (
-        previous &&
-        alive(previous.owner_pid) &&
-        Date.parse(previous.heartbeat_at) > Date.parse(now) - 60000
-      )
-        return { acquired: false, ownerPid: previous.owner_pid };
-      this.db.run(
-        "INSERT INTO locks (name, owner_pid, heartbeat_at, acquired_at, child_pid) VALUES (?, ?, ?, ?, NULL) ON CONFLICT(name) DO UPDATE SET owner_pid=excluded.owner_pid, heartbeat_at=excluded.heartbeat_at, acquired_at=excluded.acquired_at",
-        [name, pid, now, now],
-      );
-      return { acquired: true, previous };
-    });
-  }
-  refreshLock(
-    name: string,
-    pid: number,
-    acquiredAt: string,
-    now: string,
-  ): boolean {
-    return (
-      this.db.run(
-        "UPDATE locks SET heartbeat_at = ? WHERE name = ? AND owner_pid = ? AND acquired_at = ?",
-        [now, name, pid, acquiredAt],
-      ).changes === 1
-    );
-  }
-  releaseLock(name: string, pid: number, acquiredAt: string): void {
-    this.db.run(
-      "DELETE FROM locks WHERE name = ? AND owner_pid = ? AND acquired_at = ?",
-      [name, pid, acquiredAt],
-    );
-  }
-  setLockChild(
-    name: string,
-    pid: number,
-    acquiredAt: string,
-    childPid: number | null,
-  ): void {
-    if (
-      !this.db.run(
-        "UPDATE locks SET child_pid = ? WHERE name = ? AND owner_pid = ? AND acquired_at = ?",
-        [childPid, name, pid, acquiredAt],
-      ).changes
-    )
-      throw new Error(`lock ${name} ownership changed`);
   }
 
   close(): void {

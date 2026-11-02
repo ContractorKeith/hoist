@@ -14,6 +14,7 @@ export interface App {
   domain: string;
   health_path: string;
   retention?: number;
+  main_branch?: string | null;
 }
 export interface Release {
   id: number;
@@ -28,7 +29,20 @@ export interface Release {
   pruned_at?: string | null;
   status: "building" | "built" | "failed" | "live" | "stopped";
 }
+export interface Preview {
+  app_id: number;
+  branch: string;
+  slug: string;
+  last_push_at: string;
+}
 export interface Store {
+  stopBranchReleases(appId: number, branch: string): void;
+  removePreview(appId: number, branch: string): void;
+  setMainBranch(appId: number, branch: string): void;
+  previews(appId: number): Preview[];
+  upsertPreview(input: Preview): void;
+  deletePreview(appId: number, branch: string): void;
+
   secretKey(verifyFile?: boolean): Promise<CryptoKey>;
   config(appId: number): Record<string, string>;
   setConfig(appId: number, key: string, value: string): void;

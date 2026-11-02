@@ -1,5 +1,6 @@
 import type { DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
+import { availableHost, previewHost } from "./previews";
 import { nextReleaseNumber } from "./releases";
 import { branchSlug } from "./validation";
 
@@ -12,12 +13,28 @@ export function reserveRelease(
   const slug = branchSlug(branch);
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Invalid git SHA");
   return store.transaction(() => {
-    if (
+    const collision =
       store
         .releases(app.id)
-        .some((row) => row.branch !== branch && branchSlug(row.branch) === slug)
-    )
-      throw new Error("Branch slug collides with an existing branch");
+        .find(
+          (row) => row.branch !== branch && branchSlug(row.branch) === slug,
+        ) ??
+      store
+        .previews(app.id)
+        .find((row) => row.branch !== branch && row.slug === slug);
+    if (collision)
+      throw new Error(
+        `Branch slug collides with existing branch ${collision.branch}`,
+      );
+    if (branch !== (app.main_branch ?? "main")) {
+      availableHost(store, previewHost(app, branch), app.id);
+      store.upsertPreview({
+        app_id: app.id,
+        branch,
+        slug,
+        last_push_at: new Date().toISOString(),
+      });
+    }
     const number = nextReleaseNumber(store, app.id, branch);
     return store.insertRelease({
       app_id: app.id,

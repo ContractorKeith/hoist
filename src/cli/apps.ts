@@ -8,19 +8,28 @@ import { appName, healthPath } from "../core/validation";
 import { createRepo } from "../git/repository";
 import { caddySettings } from "../server";
 import type { Store } from "../store/interface";
+import { type AppSetContext, setAppBranch } from "./app-branch";
 
-export function appsSet(store: Store, args: string[]): void {
+export function appsSet(
+  store: Store,
+  args: string[],
+  context?: AppSetContext,
+): void | Promise<void> {
   const [, name, setting, ...extra] = args;
   const app = knownApp(store, appName(name ?? ""));
+  if (!extra.length && setting?.startsWith("branch="))
+    return setAppBranch(store, args, context);
   const match = /^retention=([1-9]|[1-9][0-9]|100)$/.exec(setting ?? "");
   if (extra.length || !match)
-    throw new Error("Usage: hoist apps:set <app> retention=N (1..100)");
+    throw new Error(
+      "Usage: hoist apps:set <app> retention=N (1..100) | branch=<name>",
+    );
   store.setRetention(app.id, Number(match[1]));
   console.log("saved");
 }
 
 const usage =
-  "Usage: hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] | apps:list [--json] | apps:info <name> [--json] | apps:destroy <name> [--force] | logs <app> [-f] [-n <lines>] [--release vN] [--branch <b>] | version";
+  "Usage: hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] | apps:list [--json] | apps:info <name> [--json] | apps:destroy <name> [--force] | logs <app> [-f] [-n <lines>] [--release vN] [--branch <b>] | apps:set <app> retention=N|branch=<name> | previews:list <app> [--json] | previews:destroy <app> <branch> | version";
 
 export function parseCli(args: string[]): {
   verb: string;

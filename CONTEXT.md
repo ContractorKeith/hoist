@@ -25,8 +25,9 @@ failed health check leaves the old release live and fails the push.
 _Avoid_: deploy, switch, blue-green
 
 **Preview**:
-The release chain for a non-main branch of an app, served at `<branch>.<app>.<domain>`.
-Removed by a branch-delete push or after 7 idle days.
+The release chain for a branch other than the app's configured main branch (default `main`),
+served at `<branch-slug>.<app.domain>`. Removed by a branch-delete push,
+`previews:destroy`, or after 7 idle days (configurable).
 _Avoid_: staging, environment, branch deploy
 
 **Control plane**:

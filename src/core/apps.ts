@@ -1,6 +1,7 @@
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
 import type { App, Store } from "../store/interface";
 import { removeImages } from "./build";
+import { availableHost, previewHost, releaseHost } from "./previews";
 import { appName, healthPath } from "./validation";
 
 export function knownApp(store: Store, name: string): App {
@@ -21,6 +22,7 @@ export async function createApp(
   appName(name);
   healthPath(health);
   if (store.app(name)) throw new Error("App already exists");
+  availableHost(store, domain);
   try {
     await provision();
   } catch (error) {
@@ -29,7 +31,10 @@ export async function createApp(
     throw error;
   }
   try {
-    return store.createApp(name, domain, health);
+    return store.transaction(() => {
+      availableHost(store, domain);
+      return store.createApp(name, domain, health);
+    });
   } catch (error) {
     await cleanup();
     throw error;
@@ -55,10 +60,15 @@ export async function destroyApp(
     await docker.removeContainer(container.id);
   }
   await removeImages(docker, { "hoist.app": app.name });
+  const hosts = new Set([
+    app.domain,
+    ...store.previews(app.id).map((row) => previewHost(app, row.branch)),
+    ...store.releases(app.id).map((row) => releaseHost(app, row.branch)),
+  ]);
   await cleanup();
   store.deleteApp(app.id);
   try {
-    await caddy.removeRoute(app.domain);
+    for (const host of hosts) await caddy.removeRoute(host);
   } catch (error) {
     if (
       !(error instanceof Error) ||
