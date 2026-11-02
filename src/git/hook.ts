@@ -1,7 +1,8 @@
-import { open, rm } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { SqliteAppLocks } from "../adapters/app-lock";
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
+import { removeReleaseLogs } from "../cli/releases";
 import {
   buildRelease,
   removeReleaseImages,
@@ -167,18 +168,7 @@ async function receiveLocked(
             await Bun.write(Bun.stderr, chunk).catch(() => {});
           },
         );
-        await prune(store, docker, app, (row) =>
-          rm(
-            join(
-              root,
-              "releases",
-              app.name,
-              branchSlug(row.branch),
-              `v${row.number}`,
-            ),
-            { recursive: true, force: true },
-          ),
-        );
+        await prune(store, docker, app, removeReleaseLogs(root, app.name));
       } finally {
         await logFile.close();
       }

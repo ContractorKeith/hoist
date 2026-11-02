@@ -47,8 +47,10 @@ export class SqliteStore implements Store {
       .immediate();
   }
 
+  private key?: Promise<CryptoKey>;
   secretKey(): Promise<CryptoKey> {
-    return keyfile(this.dataDir);
+    this.key ??= keyfile(this.dataDir);
+    return this.key;
   }
   config(appId: number): Record<string, string> {
     return Object.fromEntries(

@@ -1,3 +1,4 @@
+import type { DockerClient } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
 import { nextReleaseNumber } from "./releases";
 
@@ -11,10 +12,7 @@ export function rollbackTarget(rows: Release[], target?: string): Release {
     target !== undefined
       ? main.find((row) => row.number === Number(target.slice(1)))
       : main.findLast(
-          (row) =>
-            row.status === "stopped" &&
-            row.number < live.number &&
-            !row.pruned_at,
+          (row) => row.status === "stopped" && row.number < live.number,
         );
   if (!row)
     throw new Error(
@@ -22,24 +20,38 @@ export function rollbackTarget(rows: Release[], target?: string): Release {
         ? `Unknown rollback target ${target}.`
         : "No previous stopped main release is available.",
     );
-  if (row.pruned_at) throw new Error(`Release v${row.number} has been pruned.`);
-  if (!["live", "stopped", "built"].includes(row.status))
+  if (row.status === "live")
+    throw new Error(`v${row.number} is already live; use hoist restart <app>`);
+  if (!["stopped", "built"].includes(row.status))
     throw new Error(`Cannot roll back to a ${row.status} release.`);
   return row;
 }
-export function copyRelease(
+export async function copyRelease(
   store: Store,
+  docker: DockerClient,
   app: App,
   restart: boolean,
   target?: string,
-): Release {
-  return store.transaction(() => {
-    const rows = store.releases(app.id);
-    const source = restart
-      ? rows.findLast((row) => row.branch === "main" && row.status === "live")
-      : rollbackTarget(rows, target);
-    if (!source) throw new Error("App has no live main release.");
-    return store.insertRelease({
+): Promise<Release> {
+  const rows = store.releases(app.id);
+  const source = restart
+    ? rows.findLast((row) => row.branch === "main" && row.status === "live")
+    : rollbackTarget(rows, target);
+  if (!source) throw new Error("App has no live main release.");
+  try {
+    await docker.imagePorts(source.image);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /^Docker GET \/images\/.*: 404(?: |$)/.test(error.message)
+    )
+      throw new Error(
+        `image for v${source.number} was pruned; cannot roll back`,
+      );
+    throw error;
+  }
+  return store.transaction(() =>
+    store.insertRelease({
       app_id: app.id,
       branch: "main",
       number: nextReleaseNumber(store, app.id, "main"),
@@ -49,6 +61,6 @@ export function copyRelease(
         ? JSON.stringify(store.config(app.id))
         : source.config_json,
       status: "built",
-    });
-  });
+    }),
+  );
 }

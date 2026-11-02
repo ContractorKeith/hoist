@@ -12,9 +12,10 @@ import type { Store } from "../store/interface";
 export function appsSet(store: Store, args: string[]): void {
   const [, name, setting, ...extra] = args;
   const app = knownApp(store, appName(name ?? ""));
-  if (extra.length || !/^retention=([1-9]|[1-9][0-9]|100)$/.test(setting ?? ""))
+  const match = /^retention=([1-9]|[1-9][0-9]|100)$/.exec(setting ?? "");
+  if (extra.length || !match)
     throw new Error("Usage: hoist apps:set <app> retention=N (1..100)");
-  store.setRetention(app.id, Number(setting?.slice(10)));
+  store.setRetention(app.id, Number(match[1]));
   console.log("saved");
 }
 

@@ -57,7 +57,14 @@ export async function releasesCommand(
       `Usage: hoist ${verb} <app>${verb === "rollback" ? " [vN]" : ""}`,
     );
   await new SqliteAppLocks(store).withLock(app.name, async () => {
-    const release = copyRelease(store, app, verb === "restart", rest[0]);
+    const docker = new Docker();
+    const release = await copyRelease(
+      store,
+      docker,
+      app,
+      verb === "restart",
+      rest[0],
+    );
     const path = privatePath(
       join(
         root,
@@ -72,7 +79,6 @@ export async function releasesCommand(
       root,
     );
     const file = await open(path, "a", 0o600);
-    const docker = new Docker();
     try {
       await cutover(
         store,

@@ -116,7 +116,7 @@ ordinary files `0600`; executable checkout files retain owner execute permission
 
 ```bash
 ssh hoist@server hoist config:set hello DATABASE_URL='postgres://…' PORT=8080
-ssh hoist@server hoist config:list hello              # masked values and byte lengths
+ssh hoist@server hoist config:list hello              # masked values
 ssh hoist@server hoist config:list hello --json --reveal
 ssh hoist@server hoist config:unset hello PORT
 ssh hoist@server hoist restart hello
@@ -135,13 +135,15 @@ Only `--reveal` and container startup decrypt values.
 Restart creates a new numbered main release from the live image and current config.
 Rollback creates a new release copying the target image and its config snapshot. Both
 use the push cutover path under the app lease and save progress in `build.log`.
-Failed, building, unknown and pruned rollback targets are refused.
+Failed, building, unknown and already-live rollback targets are refused, as are targets
+whose images are gone. A shared image can still be rolled back to after its old logs are pruned.
 
 After successful cutover, retention keeps the newest five live/stopped/built releases
 per app and branch by default (`retention=1..100`). The live release is always protected.
 Older releases get `pruned_at`; their log directories and unreferenced image tags are
-removed. Shared image tags used by retained rollbacks stay. Failed release logs stay,
-while their unreferenced images are removed best effort.
+removed. Shared image tags used by retained rollbacks stay. Failed releases are marked pruned
+after image cleanup is attempted, while their log directories stay for M4. Masked config
+listings omit value lengths; `--reveal` includes values and byte lengths.
 
 ## Development
 

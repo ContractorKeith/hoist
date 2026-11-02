@@ -16,7 +16,11 @@ import { releasesCommand } from "./releases";
 
 const commands: Record<
   string,
-  (root: string, store: SqliteStore, args: string[]) => unknown
+  (
+    root: string,
+    store: SqliteStore,
+    args: string[],
+  ) => number | void | Promise<number> | Promise<void>
 > = {
   "config:set": (_root, store, args) => configCommand(store, args),
   "config:unset": (_root, store, args) => configCommand(store, args),
@@ -109,15 +113,11 @@ export async function run(args: string[]): Promise<number> {
     if (handler) {
       const root = dataRoot();
       store = new SqliteStore(root);
-      await handler(root, store, args);
-      return 0;
+      return (await handler(root, store, args)) ?? 0;
     }
-    const command = parseCli(args);
-    if (command.verb === "version") {
-      console.log(version);
-      return 0;
-    }
-    throw new Error("Unknown command");
+    parseCli(args);
+    console.log(version);
+    return 0;
   } catch (error) {
     if (!wasBuildErrorLogged(error))
       console.error(error instanceof Error ? error.message : String(error));

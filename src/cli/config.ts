@@ -36,7 +36,8 @@ export async function configCommand(
       key = await store.secretKey();
     const encrypted = await Promise.all(
       values.map(
-        async ([name, value]) => [name, await encrypt(key, value)] as const,
+        async ([name, value]) =>
+          [name, await encrypt(key, value, app.id, name)] as const,
       ),
     );
     store.transaction(() => {
@@ -61,21 +62,19 @@ export async function configCommand(
         : undefined;
     const values = await Promise.all(
       entries.map(async ([name, ciphertext]) => {
-        const length =
-          Buffer.from(ciphertext.split(":")[2] ?? "", "base64").length - 16;
-        const value = key ? await decrypt(key, ciphertext) : "••••";
-        return {
-          key: name,
-          value: rest.includes("--reveal") ? value : "••••",
-          length,
-        };
+        if (!key) return { key: name, value: "••••" };
+        const value = await decrypt(key, ciphertext, app.id, name);
+        return { key: name, value, length: Buffer.byteLength(value) };
       }),
     );
     print(
       rest.includes("--json")
         ? JSON.stringify(values)
         : values
-            .map((row) => `${row.key}=${row.value} (${row.length} bytes)`)
+            .map(
+              (row) =>
+                `${row.key}=${row.value}${row.length === undefined ? "" : ` (${row.length} bytes)`}`,
+            )
             .join("\n"),
     );
   }

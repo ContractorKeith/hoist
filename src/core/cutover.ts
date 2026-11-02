@@ -41,7 +41,7 @@ async function startHealthy(
   let id: string | undefined;
   try {
     healthPath(app.health_path);
-    const config = await decryptConfig(store, release.config_json);
+    const config = await decryptConfig(store, app.id, release.config_json);
     const port = appPort(await docker.imagePorts(release.image), config);
     await log("Starting new container");
     id = await docker.createContainer({

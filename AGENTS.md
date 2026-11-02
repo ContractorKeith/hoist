@@ -62,12 +62,14 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - A Caddy restart during a push may fail its route write; the hook fails that release and removes its candidate.
 - Five consecutive Caddy exits under 10 s fail serve with exit code and a 50-line stderr tail; shutdown/not-ready cleanup escalates SIGTERM to SIGKILL after 5 s.
 - `HOIST_DIR/secret.key` is a generated 32-byte key (0600). Back it up with the database;
-  config values and immutable release snapshots contain AES-256-GCM ciphertext at rest.
+  config values and immutable release snapshots contain AES-256-GCM ciphertext at rest,
+  authenticated to their app ID and config key. Masked listings omit value lengths.
 - `restart` and `rollback` create new numbered releases through the same locked cutover as a push.
   Restart uses current config; rollback copies the target image and encrypted config snapshot.
 - Retention defaults to five newest live/stopped/built releases per app and branch. Pruning
   preserves live releases and shared image tags, removes old logs, and records `pruned_at`.
-  Failed release logs remain; their unreferenced images are removed best effort.
+  Failed release logs remain while their rows are marked pruned; images are removed best effort.
+  Rollback checks image existence, since a pruned row can share a retained image.
 - One process. Caddy is a supervised child; the preview sweeper is a timer. No queue.
 - A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
   change during cutover. Delete is governed by retention (M3).

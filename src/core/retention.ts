@@ -20,7 +20,8 @@ export function retentionSelection(rows: Release[], count: number): Release[] {
       !row.pruned_at &&
       row.status !== "live" &&
       (row.status === "failed" ||
-        (["stopped", "built"].includes(row.status) && !keep.has(row.id))),
+        (["live", "stopped", "built"].includes(row.status) &&
+          !keep.has(row.id))),
   );
 }
 export async function prune(
@@ -40,8 +41,8 @@ export async function prune(
   for (const row of selected) {
     if (!protectedImages.has(row.image))
       await docker.removeImage(row.image).catch(() => {});
-    if (row.status === "failed") continue; // Failed build logs remain available to logs --release.
-    await removeLogs(row);
+    // Failed build logs remain available to logs --release after image pruning.
+    if (row.status !== "failed") await removeLogs(row);
     store.markPruned(row.id);
   }
 }

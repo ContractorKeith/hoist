@@ -49,7 +49,7 @@ scenario(
         );
       });
       const masked = await h.control("config:list", "hello");
-      expect(masked.stdout).toContain("HOIST_TEST_A=•••• (17 bytes)");
+      expect(masked.stdout).toBe("HOIST_TEST_A=••••\nHOIST_TEST_B=••••\n");
       expect(masked.stdout).not.toContain("unique-secret-one");
       expect(
         (await h.control("config:list", "hello", "--reveal")).stdout,
