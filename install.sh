@@ -31,6 +31,10 @@ if [ "$#" -gt 0 ]; then
   [ "$#" = 2 ] && [ "$1" = --key ] || fail 'Usage: install.sh [--key <public-key-file>]'
   owner_key=$(cat "$2")
 fi
+if [ "$#" -gt 0 ] || [ -n "$owner_key" ]; then
+  case "$owner_key" in ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-*\ *) ;; *) fail 'Provide one public SSH key.' ;; esac
+  [ "$(printf '%s\n' "$owner_key" | wc -l)" -eq 1 ] || fail 'Provide one public SSH key line.'
+fi
 new_install=0
 if [ ! -f /etc/hoist/hoist.env ]; then
   new_install=1
@@ -177,8 +181,6 @@ if [ -d /run/systemd/system ]; then
   done
 else say 'systemd is unavailable; start hoist serve separately.'; fi
 if [ -n "$owner_key" ]; then
-  case "$owner_key" in ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-*\ *) ;; *) fail 'Provide one public SSH key.' ;; esac
-  [ "$(printf '%s\n' "$owner_key" | wc -l)" -eq 1 ] || fail 'Provide one public SSH key line.'
   key_line="command=\"set -a; . /etc/hoist/hoist.env; set +a; exec /usr/local/bin/hoist ssh-dispatch\",restrict $owner_key"
   install -d -m 0700 -o hoist -g hoist /var/lib/hoist/.ssh
   authorized=/var/lib/hoist/.ssh/authorized_keys

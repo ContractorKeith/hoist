@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -10,6 +11,7 @@ import {
   rm,
 } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
+import { processAlive } from "../adapters/app-lock";
 import { appName, branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 
@@ -56,6 +58,8 @@ export async function createRepo(root: string, name: string): Promise<void> {
   }
 }
 
+const activeStaging = new Set<string>();
+
 // Keep creation and upgrade repair on exactly the same hook template.
 export async function rewriteHooks(
   root: string,
@@ -70,6 +74,23 @@ export async function rewriteHooks(
       false,
       root,
     );
+    // Remove abandoned files, but never unlink another running repair's staging file.
+    for (const staged of await readdir(directory)) {
+      if (!staged.startsWith(`.${hook}.`) || !staged.endsWith(".next"))
+        continue;
+      const candidate = join(directory, staged);
+      const pid = Number(staged.slice(hook.length + 2).split(".")[0]);
+      if (
+        activeStaging.has(candidate) ||
+        (pid > 0 &&
+          pid <= 2147483647 &&
+          Number.isInteger(pid) &&
+          pid !== process.pid &&
+          processAlive(pid))
+      )
+        continue;
+      await rm(candidate, { force: true });
+    }
     const path = join(directory, hook);
     const entry = await lstat(path).catch((error) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -80,9 +101,13 @@ export async function rewriteHooks(
     const expected = `#!/bin/sh\nexec ${executableCommand()} git-hook ${hook} ${shellQuote(name)}\n`;
     const previous = entry ? await readFile(path, "utf8") : "";
     if (previous !== expected) {
-      const next = join(directory, `.${hook}.next`);
-      const file = await open(next, "wx", 0o700);
+      const next = join(
+        directory,
+        `.${hook}.${process.pid}.${randomUUID()}.next`,
+      );
+      activeStaging.add(next);
       try {
+        const file = await open(next, "wx", 0o700);
         try {
           await file.writeFile(expected);
         } finally {
@@ -93,6 +118,8 @@ export async function rewriteHooks(
       } catch (error) {
         await rm(next, { force: true });
         throw error;
+      } finally {
+        activeStaging.delete(next);
       }
       changes.push(
         `${name} ${hook}: replaced ${previous.trim().replace(/\s+/g, " ")} with ${expected.trim().replace(/\s+/g, " ")}`,
@@ -109,6 +136,13 @@ export async function repairRepoHooks(root: string): Promise<string[]> {
     try {
       if (!entry.endsWith(".git")) throw new Error("not a bare repository");
       appName(entry.slice(0, -4));
+      const repo = join(repos, entry);
+      const [head, objects] = await Promise.all([
+        lstat(join(repo, "HEAD")).catch(() => null),
+        lstat(join(repo, "objects")).catch(() => null),
+      ]);
+      if (!head?.isFile() || !objects?.isDirectory())
+        throw new Error("not a bare repository");
     } catch (error) {
       changes.push(
         `skipped ${entry}: ${error instanceof Error ? error.message : String(error)}`,

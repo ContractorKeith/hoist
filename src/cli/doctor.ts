@@ -14,7 +14,24 @@ export async function runChecks(
   noService = false,
 ): Promise<DoctorResult[]> {
   const results: DoctorResult[] = [];
+  let databaseFailed = false;
+  const needsStore = new Set([
+    "Secret key",
+    "Serve lease",
+    "Orphan containers",
+    "Orphan images",
+    "Orphan routes",
+    "Dashboard password",
+  ]);
   for (const [check, run] of Object.entries(checks)) {
+    if (databaseFailed && needsStore.has(check)) {
+      results.push({
+        check,
+        status: "warning",
+        message: "Skipped until the database check passes.",
+      });
+      continue;
+    }
     let status: DoctorResult["status"] = "ok",
       message = `${check} is ready.`;
     try {
@@ -32,19 +49,23 @@ export async function runChecks(
       if (error && typeof error === "object" && "code" in error)
         message += ` Fix ${check.toLowerCase()} and rerun doctor.`;
     }
+    if (check === "Database" && status === "error") databaseFailed = true;
     results.push({ check, status, message });
   }
   return results;
 }
 
-export async function doctor(args: string[]): Promise<number> {
+export async function doctor(
+  args: string[],
+  createChecks = doctorChecks,
+): Promise<number> {
   if (args.length > 2 || args.slice(1).some((arg) => arg !== "--json"))
     throw new Error("Usage: hoist doctor [--json]");
   let store: SqliteStore | undefined;
   const root = process.env.HOIST_DIR ?? "/var/lib/hoist";
   let results: DoctorResult[];
   try {
-    const checks = doctorChecks(
+    const checks = createChecks(
       root,
       () => (store ??= new SqliteStore(dataRoot())),
     );

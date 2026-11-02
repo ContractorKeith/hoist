@@ -3,7 +3,11 @@ import { command, ok } from "./ssh";
 
 export function installerCommands(name: string) {
   const inside = (...args: string[]) => ok(["docker", "exec", name, ...args]);
-  const invoke = (env: string[], script = "/install.sh", key = true) =>
+  const invoke = (
+    env: string[],
+    script = "/install.sh",
+    key: boolean | string = true,
+  ) =>
     command([
       "docker",
       "exec",
@@ -11,7 +15,7 @@ export function installerCommands(name: string) {
       name,
       "sh",
       script,
-      ...(key ? ["--key", "/owner.pub"] : []),
+      ...(key ? ["--key", typeof key === "string" ? key : "/owner.pub"] : []),
     ]);
   return { inside, invoke };
 }
@@ -29,6 +33,30 @@ export async function beforeInstall(name: string) {
   );
   expect(local.code).toBe(1);
   expect(local.output).toContain("HOIST_LOCAL_BINARY requires HOIST_E2E=1.");
+  await inside("sh", "-c", "printf not-a-key > /bad-owner.pub");
+  const env = [
+    "HOIST_DOMAIN=example.test",
+    "HOIST_ACME_EMAIL=owner@example.test",
+  ];
+  const invalid = await invoke(env, "/install.sh", "/bad-owner.pub");
+  expect(invalid.code).toBe(1);
+  expect(invalid.output).toContain("Provide one public SSH key.");
+  await inside("touch", "/empty-owner.pub");
+  const empty = await invoke(env, "/install.sh", "/empty-owner.pub");
+  expect(empty.code).toBe(1);
+  expect(empty.output).toContain("Provide one public SSH key.");
+  const multiline = await invoke(
+    [...env, "HOIST_OWNER_KEY=ssh-ed25519 AAA\nsecond-line"],
+    "/install.sh",
+    false,
+  );
+  expect(multiline.code).toBe(1);
+  expect(multiline.output).toContain("Provide one public SSH key line.");
+  await inside(
+    "sh",
+    "-c",
+    "test ! -e /usr/bin/git && test ! -e /etc/apt/sources.list.d/docker.list && test ! -e /etc/hoist/hoist.env",
+  );
   await inside("sh", "-c", "test ! -e /usr/local/bin/hoist");
 }
 export async function downloadGuards(

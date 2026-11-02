@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { commandArgs } from "../../src/git/dispatch";
 import { command, ok } from "../e2e/ssh";
 
 test("Node client preserves exact ssh argv, host precedence and exit code", async () => {
@@ -31,16 +32,14 @@ test("Node client preserves exact ssh argv, host precedence and exit code", asyn
     expect(
       (await command(["node", cli, "--host", "test", ...args], { env })).code,
     ).toBe(23);
-    expect(await Bun.file(output).json()).toEqual([
-      "hoist@test",
-      "hoist",
-      ...args,
-    ]);
+    const actual = (await Bun.file(output).json()) as string[];
+    expect(actual[0]).toBe("hoist@test");
+    expect(commandArgs(actual.slice(1).join(" "))).toEqual(["hoist", ...args]);
     expect((await command(["node", cli, "apps:list"], { env })).code).toBe(23);
     expect(await Bun.file(output).json()).toEqual([
       "hoist@default",
-      "hoist",
-      "apps:list",
+      "'hoist'",
+      "'apps:list'",
     ]);
     expect(
       (
@@ -114,4 +113,42 @@ for (const [signal, code] of [
 test("client help exposes only verbs available through SSH", async () => {
   const help = await ok(["node", resolve("cli/bin/hoist.js"), "--help"]);
   expect(help.stdout).not.toMatch(/\bserve\b|\bssh-dispatch\b|\bgit-hook\b/);
+});
+
+async function clientArgv(args: string[]): Promise<string[]> {
+  const root = await mkdtemp(join(tmpdir(), "client-quoting-"));
+  try {
+    await Bun.write(
+      join(root, "ssh"),
+      `#!/bin/sh\nexec node -e 'console.log(JSON.stringify(process.argv.slice(1)))' -- "$@"\n`,
+    );
+    await chmod(join(root, "ssh"), 0o700);
+    const result = await ok(
+      ["node", resolve("cli/bin/hoist.js"), "--host", "test", ...args],
+      { env: { ...process.env, PATH: `${root}:${process.env.PATH}` } },
+    );
+    return JSON.parse(result.stdout) as string[];
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test("client quotes spaces, apostrophes and empty strings in remote SSH argv", async () => {
+  expect(
+    await clientArgv(["config:set", "demo", "KEY=a OTHER=oops", "it's", ""]),
+  ).toEqual([
+    "hoist@test",
+    "'hoist'",
+    "'config:set'",
+    "'demo'",
+    "'KEY=a OTHER=oops'",
+    "'it'\"'\"'s'",
+    "''",
+  ]);
+});
+
+test("client remote command round-trips through the server tokenizer without splitting config values", async () => {
+  const original = ["config:set", "demo", "KEY=a OTHER=oops", "it's", ""];
+  const argv = await clientArgv(original);
+  expect(commandArgs(argv.slice(1).join(" "))).toEqual(["hoist", ...original]);
 });

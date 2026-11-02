@@ -89,7 +89,21 @@ export function doctorChecks(
       );
       await access(root, constants.R_OK | constants.W_OK | constants.X_OK);
     },
-    Database: () => store().migrate(),
+    Database: () => {
+      try {
+        store().migrate();
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.message.includes("file is not a database") ||
+            (error as { code?: string }).code === "SQLITE_NOTADB")
+        )
+          throw new Error(
+            `${join(root, "hoist.db")} is not a SQLite database; restore it from your backup.`,
+          );
+        throw error;
+      }
+    },
     "Secret key": async () => {
       await store().secretKey(true);
     },

@@ -26,10 +26,16 @@ if (args.length === 1 && args[0] === "--help") {
   );
   process.exitCode = 1;
 } else {
-  const child = spawn("ssh", [`hoist@${host}`, "hoist", ...args], {
-    stdio: "inherit",
-    shell: false,
-  });
+  // OpenSSH joins remote argv with spaces; quote for the server's tokenizer.
+  const quote = (value) => `'${value.replace(/'/g, `'"'"'`)}'`;
+  const child = spawn(
+    "ssh",
+    [`hoist@${host}`, ...["hoist", ...args].map(quote)],
+    {
+      stdio: "inherit",
+      shell: false,
+    },
+  );
   child.on("error", (error) => {
     console.error(error.message);
     process.exitCode = 1;
