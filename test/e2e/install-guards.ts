@@ -83,6 +83,18 @@ export async function downloadGuards(
   await inside(
     "sh",
     "-c",
+    "sed 's/^HOIST_PINNED_VERSION=.*/HOIST_PINNED_VERSION=v0.1.0/; s/^HOIST_X64_SHA256=.*/HOIST_X64_SHA256=wrong/; s/^HOIST_ARM64_SHA256=.*/HOIST_ARM64_SHA256=wrong/' /install.sh > /install-other.sh",
+  );
+  const other = await invoke(
+    [...env, "HOIST_VERSION=v0.2.0"],
+    "/install-other.sh",
+  );
+  if (other.code) throw new Error(other.output);
+  expect(other.output).toContain("checked against the release checksums");
+
+  await inside(
+    "sh",
+    "-c",
     `printf '%s  %s\\n' '${"0".repeat(64)}' 'hoist-linux-${arch}' > /fake-release/checksums.txt`,
   );
   const tampered = await invoke(env);
@@ -94,7 +106,7 @@ export async function downloadGuards(
   await inside(
     "sh",
     "-c",
-    `sed 's/^HOIST_${arch.toUpperCase()}_SHA256=.*/HOIST_${arch.toUpperCase()}_SHA256=${digest}/' /install.sh > /install-pinned.sh`,
+    `sed 's/^HOIST_PINNED_VERSION=.*/HOIST_PINNED_VERSION=v0.1.0/; s/^HOIST_${arch.toUpperCase()}_SHA256=.*/HOIST_${arch.toUpperCase()}_SHA256=${digest}/' /install.sh > /install-pinned.sh`,
   );
   const pinned = await invoke(env, "/install-pinned.sh");
   if (pinned.code) throw new Error(pinned.output);

@@ -4,6 +4,7 @@ set -eu
 umask 077
 HOIST_VERSION=${HOIST_VERSION:-v0.1.0}
 # BEGIN HOIST PINS (filled by the release workflow)
+HOIST_PINNED_VERSION=
 HOIST_X64_SHA256=
 HOIST_ARM64_SHA256=
 # END HOIST PINS
@@ -99,7 +100,7 @@ if [ -n "${HOIST_LOCAL_BINARY:-}" ]; then
   say "Using local hoist binary: $HOIST_LOCAL_BINARY."
 else
   curl -fL --retry 3 "$base/hoist-linux-$arch" -o "$stage/hoist-linux-$arch"
-  if [ -n "$hoist_sha" ]; then
+  if [ "$HOIST_VERSION" = "$HOIST_PINNED_VERSION" ] && [ -n "$hoist_sha" ]; then
     printf '%s  %s\n' "$hoist_sha" "$stage/hoist-linux-$arch" | sha256sum -c -
     say "Downloaded and verified hoist $HOIST_VERSION ($arch) against the installer pin."
   else
