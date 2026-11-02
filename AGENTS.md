@@ -10,10 +10,10 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 
 ## Status
 
-M0–M4 done — 2026-11-01/02 (#9, #14, #19, #22, #20): toolchain and harness; apps, SSH dispatch,
-builds and releases; cutover, Caddy supervisor, reconcile, SQLite leases; encrypted config,
-rollback, restart, retention; live and per-release logs. M5 (previews) in progress — PR #21.
-M6 dashboard and M7 installer remain.
+M0–M5 done — 2026-11-01/02 (#9, #14, #19, #22, #20, #21): toolchain and harness; apps, SSH
+dispatch, builds and releases; cutover, Caddy supervisor, reconcile, SQLite leases; encrypted
+config, rollback, restart, retention; live and per-release logs; preview branches with
+post-receive teardown and a TTL sweeper. M6 (dashboard) in progress. M7 installer remains.
 
 ## Commands
 
