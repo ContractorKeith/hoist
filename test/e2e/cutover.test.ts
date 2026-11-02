@@ -108,6 +108,10 @@ scenario(
       );
       expect(rows()[1]?.status).toBe("live");
       expect(rows()[2]?.status).toBe("failed");
+      const failedLog = await control("logs", "hello", "--release", "v3");
+      expect(failedLog.stdout).toContain(
+        "Health check GET / failed after 30 s: HTTP 500",
+      );
       expect(await (await request()).text()).toBe("second release\n");
       expect(
         await docker.listContainers({ "hoist.app": "hello" }),

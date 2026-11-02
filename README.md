@@ -149,6 +149,33 @@ removed. Shared image tags used by retained rollbacks stay. Failed releases are 
 after image cleanup is attempted, while their log directories stay for M4. Masked config
 listings omit value lengths; `--reveal` includes values and byte lengths.
 
+## Logs
+
+```bash
+ssh hoist@server hoist logs hello
+ssh hoist@server hoist logs hello -n 1
+ssh hoist@server hoist logs hello -f
+ssh hoist@server hoist logs hello --release v2
+ssh hoist@server hoist logs hello --branch feature-x
+```
+
+Runtime output comes from Docker, defaults to the last 100 lines, and accepts `-n`
+from 1 to 10000. Carriage returns are removed unconditionally, so progress-bar
+redraws collapse; all other bytes pass through unchanged. `-f` checks the live
+release every two seconds. Ctrl-C and a release takeover exit 0 (takeover prints
+the new release number). If the app has no live release, it prints a notice and
+exits 1. If Docker closes the stream and nothing changes within two polls, it
+prints `--- container exited ---` and exits 1. Recovery that changes only the
+container ID reattaches automatically and continues following the same release.
+
+`--release vN` reads the complete build and cutover log at
+`$HOIST_DIR/releases/<app>/<branch-slug>/vN/build.log`, including failed pushes.
+Build records are decoded to plain text before saving. The pusher-facing copy escapes
+NUL bytes as `\0` because Git sideband truncates at NUL. Saved files retain the bytes;
+`logs` passes NUL bytes through unchanged. Interrupting saved-file output exits 130
+for SIGINT or 143 for SIGTERM, including when stdout is blocked.
+It cannot be combined with `-f` or `-n`. The branch defaults to `main`.
+
 ## Development
 
 ```bash

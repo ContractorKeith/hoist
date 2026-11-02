@@ -47,6 +47,7 @@ export interface DockerClient {
     id: string,
     follow?: boolean,
     signal?: AbortSignal,
+    tail?: number,
   ): Promise<LogStream>;
   listContainers(labels: Labels): Promise<Container[]>;
   listImages(labels: Labels): Promise<string[]>;

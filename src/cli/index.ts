@@ -12,6 +12,7 @@ import { caddySettings, serve } from "../server";
 import { SqliteStore } from "../store/sqlite";
 import { appsCommand, appsSet, parseCli } from "./apps";
 import { configCommand } from "./config";
+import { logsCommand } from "./logs";
 import { releasesCommand } from "./releases";
 
 const commands: Record<
@@ -26,6 +27,7 @@ const commands: Record<
   "config:unset": (_root, store, args) => configCommand(store, args),
   "config:list": (_root, store, args) => configCommand(store, args),
   releases: releasesCommand,
+  logs: logsCommand,
   restart: releasesCommand,
   rollback: releasesCommand,
   "apps:create": appsCommand,
@@ -127,4 +129,9 @@ export async function run(args: string[]): Promise<number> {
   }
 }
 
-if (import.meta.main) process.exitCode = await run(Bun.argv.slice(2));
+if (import.meta.main) {
+  const code = await run(Bun.argv.slice(2));
+  // A blocked native stdout write can outlive the command's completed cleanup.
+  if (code === 130 || code === 143) process.exit(code);
+  process.exitCode = code;
+}

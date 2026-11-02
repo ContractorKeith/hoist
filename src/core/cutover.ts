@@ -62,6 +62,7 @@ async function startHealthy(
       throw new Error("New container is not running");
     await log(`Health check GET ${app.health_path}`);
     await health(container.port, app.health_path);
+    await log("Health check passed (HTTP 2xx)");
     await log("Swapping Caddy upstream");
     await caddy.upsertRoute(app.domain, `127.0.0.1:${container.port}`);
     return id;
@@ -90,6 +91,7 @@ export async function cutover(
   const tip = await head();
   if (tip !== expectedOldTip) {
     store.failRelease(release.id);
+    await log(`Cutover failed: branch ${release.branch} moved`);
     throw new Error(
       `branch ${release.branch} tip is ${tip?.slice(0, 12) ?? "missing"}, not this release; skipping cutover (branch moved)`,
     );

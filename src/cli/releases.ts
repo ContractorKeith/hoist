@@ -1,4 +1,4 @@
-import { open, rm } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { SqliteAppLocks } from "../adapters/app-lock";
 import { Caddy } from "../adapters/caddy";
@@ -6,19 +6,13 @@ import { Docker } from "../adapters/docker";
 import { checkHealth } from "../adapters/health";
 import { knownApp } from "../core/apps";
 import { cutover } from "../core/cutover";
+import { removeReleaseLogs } from "../core/logs";
 import { prune } from "../core/retention";
 import { copyRelease } from "../core/rollback";
-import { appName, branchSlug } from "../core/validation";
+import { appName } from "../core/validation";
 import { privatePath } from "../data";
 import { caddySettings } from "../server";
-import type { Release, Store } from "../store/interface";
-
-export const removeReleaseLogs =
-  (root: string, name: string) => (row: Release) =>
-    rm(join(root, "releases", name, branchSlug(row.branch), `v${row.number}`), {
-      recursive: true,
-      force: true,
-    });
+import type { Store } from "../store/interface";
 
 export async function releasesCommand(
   root: string,
@@ -98,7 +92,8 @@ export async function releasesCommand(
         store,
         docker,
         app,
-        removeReleaseLogs(root, app.name),
+        (row) =>
+          removeReleaseLogs(root, app.name, row.branch, row.number, store),
         async (message) => {
           await file.writeFile(`${message}\n`);
         },

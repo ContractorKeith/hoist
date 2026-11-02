@@ -20,7 +20,7 @@ export function appsSet(store: Store, args: string[]): void {
 }
 
 const usage =
-  "Usage: hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] | apps:list [--json] | apps:info <name> [--json] | apps:destroy <name> [--force] | version";
+  "Usage: hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] | apps:list [--json] | apps:info <name> [--json] | apps:destroy <name> [--force] | logs <app> [-f] [-n <lines>] [--release vN] [--branch <b>] | version";
 
 export function parseCli(args: string[]): {
   verb: string;

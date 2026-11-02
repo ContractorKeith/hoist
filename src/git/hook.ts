@@ -2,13 +2,14 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { SqliteAppLocks } from "../adapters/app-lock";
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
-import { removeReleaseLogs } from "../cli/releases";
 import {
   buildRelease,
   removeReleaseImages,
   reserveRelease,
 } from "../core/build";
+import { buildLogDecoder, releaseLogSink } from "../core/build-logs";
 import { cutover, type HealthCheck } from "../core/cutover";
+import { removeReleaseLogs } from "../core/logs";
 import { prune } from "../core/retention";
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
@@ -100,29 +101,44 @@ async function receiveLocked(
         );
         const logFile = await open(path, "a", 0o600);
         file = logFile;
-        await buildRelease(
-          store,
-          docker,
-          release,
-          app,
-          async () => {
-            context = await prepare(root, repo, sha, signal);
-            await requireDockerfile(context.path);
-            return context.path;
-          },
-          async (chunk) => {
-            await logFile.writeFile(chunk);
-            await Bun.write(Bun.stderr, chunk).catch(() => {});
-          },
-          signal,
-          async () => {
-            const current = await refsClient.head(repo, branch);
-            if ((current ?? "0".repeat(40)) !== oldSha)
-              throw new Error(
-                `branch ${branch} moved during build; push again`,
-              );
-          },
+        const decoded = buildLogDecoder(
+          releaseLogSink(
+            (chunk) => logFile.writeFile(chunk),
+            (chunk) => Bun.write(Bun.stderr, chunk),
+          ),
         );
+        try {
+          await buildRelease(
+            store,
+            docker,
+            release,
+            app,
+            async () => {
+              context = await prepare(root, repo, sha, signal);
+              await requireDockerfile(context.path);
+              return context.path;
+            },
+            decoded.write,
+            signal,
+            async () => {
+              const current = await refsClient.head(repo, branch);
+              if ((current ?? "0".repeat(40)) !== oldSha)
+                throw new Error(
+                  `branch ${branch} moved during build; push again`,
+                );
+            },
+            async (message) => {
+              await decoded.flush();
+              await decoded.write(
+                new TextEncoder().encode(
+                  `${JSON.stringify({ error: message.replace(/[\r\n]+/g, " ") })}\n`,
+                ),
+              );
+            },
+          );
+        } finally {
+          await decoded.flush();
+        }
       } finally {
         try {
           await file?.close();
@@ -152,6 +168,10 @@ async function receiveLocked(
         root,
       );
       const logFile = await open(path, "a", 0o600);
+      const log = releaseLogSink(
+        (chunk) => logFile.writeFile(chunk),
+        (chunk) => Bun.write(Bun.stderr, chunk),
+      );
       try {
         await cutover(
           store,
@@ -164,15 +184,15 @@ async function receiveLocked(
           edge.health,
           async (message) => {
             const chunk = new TextEncoder().encode(`${message}\n`);
-            await logFile.writeFile(chunk);
-            await Bun.write(Bun.stderr, chunk).catch(() => {});
+            await log(chunk);
           },
         );
         await prune(
           store,
           docker,
           app,
-          removeReleaseLogs(root, app.name),
+          (row) =>
+            removeReleaseLogs(root, app.name, row.branch, row.number, store),
           async (message) => {
             await logFile.writeFile(`${message}\n`);
           },
