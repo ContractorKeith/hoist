@@ -34,6 +34,7 @@ test.skipIf(process.env.HOIST_E2E !== "1")(
         const result = await run();
         expect(result.code).toBe(1);
         const checks = JSON.parse(result.stdout);
+        expect(checks.find((r: { check: string }) => r.check === "Orphan images").status).toBe("ok");
         expect(
           checks.find((r: { check: string }) => r.check === "Orphan containers")
             .message,

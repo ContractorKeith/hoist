@@ -186,13 +186,9 @@ export function doctorChecks(
         ...new Map(groups.flat().map((image) => [image.Id, image])).values(),
       ];
       const tags = new Set(releases().map((r) => r.image));
-      const orphans = images
-        .filter(
-          (i) =>
-            i.Labels?.["hoist.app"] ||
-            i.RepoTags?.some((t) => t.startsWith("hoist/")),
-        )
-        .filter((i) => !i.RepoTags?.some((t) => tags.has(t)));
+      const orphans = images.filter((image) =>
+        image.RepoTags?.some((tag) => tag.startsWith("hoist/") && !tags.has(tag)),
+      );
       requireCheck(
         !orphans.length,
         `Remove orphan images: ${orphans.map((i) => i.Id).join(", ")}.`,

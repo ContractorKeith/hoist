@@ -131,6 +131,29 @@ describe("doctor", () => {
         (await runChecks({ key: checks["Secret key"] as () => unknown }))[0]
           ?.status,
       ).toBe("error");
+      store.insertRelease({
+        app_id: app.id,
+        branch: "main",
+        number: 1,
+        git_sha: "a".repeat(40),
+        image: "hoist/doctor-test:live",
+        config_json: "{}",
+        status: "live",
+      });
+      images = [
+        { Id: "parent", Labels: { "hoist.app": app.name } },
+        {
+          Id: "none",
+          RepoTags: ["<none>:<none>"],
+          Labels: { "hoist.app": app.name },
+        },
+        { Id: "live", RepoTags: ["hoist/doctor-test:live"] },
+      ];
+      expect(
+        (
+          await runChecks({ images: checks["Orphan images"] as () => unknown })
+        )[0]?.status,
+      ).toBe("ok");
       images = [
         {
           Id: "sha256:orphan",
