@@ -13,6 +13,7 @@ export interface App {
   name: string;
   domain: string;
   health_path: string;
+  retention?: number;
 }
 export interface Release {
   id: number;
@@ -24,9 +25,16 @@ export interface Release {
   config_json: string;
   container_id?: string | null;
   created_at?: string;
+  pruned_at?: string | null;
   status: "building" | "built" | "failed" | "live" | "stopped";
 }
 export interface Store {
+  secretKey(): Promise<CryptoKey>;
+  config(appId: number): Record<string, string>;
+  setConfig(appId: number, key: string, value: string): void;
+  unsetConfig(appId: number, key: string): void;
+  setRetention(appId: number, retention: number): void;
+  markPruned(id: number): void;
   lock(name: string): LockRow | null;
   acquireLock(
     name: string,

@@ -1,5 +1,6 @@
 import type { CaddyAdmin, DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
+import { decryptConfig } from "./secrets";
 import { healthPath } from "./validation";
 
 export type HealthCheck = (port: number, path: string) => Promise<void>;
@@ -29,6 +30,7 @@ export function ownsContainer(
 }
 
 async function startHealthy(
+  store: Store,
   docker: DockerClient,
   caddy: CaddyAdmin,
   app: App,
@@ -39,7 +41,7 @@ async function startHealthy(
   let id: string | undefined;
   try {
     healthPath(app.health_path);
-    const config = JSON.parse(release.config_json) as Record<string, string>;
+    const config = await decryptConfig(store, release.config_json);
     const port = appPort(await docker.imagePorts(release.image), config);
     await log("Starting new container");
     id = await docker.createContainer({
@@ -93,7 +95,7 @@ export async function cutover(
   }
   let id: string;
   try {
-    id = await startHealthy(docker, caddy, app, release, health, log);
+    id = await startHealthy(store, docker, caddy, app, release, health, log);
   } catch (error) {
     store.failRelease(release.id);
     await log(error instanceof Error ? error.message : String(error)).catch(
@@ -146,6 +148,7 @@ export async function recoverLive(
       `${app.name} release ${release.id}: container ${oldId} ownership does not match; recovering`,
     );
   const id = await startHealthy(
+    store,
     docker,
     caddy,
     app,

@@ -1,4 +1,4 @@
-import { open } from "node:fs/promises";
+import { open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { SqliteAppLocks } from "../adapters/app-lock";
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
@@ -8,6 +8,7 @@ import {
   reserveRelease,
 } from "../core/build";
 import { cutover, type HealthCheck } from "../core/cutover";
+import { prune } from "../core/retention";
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 import type { App, Release, Store } from "../store/interface";
@@ -165,6 +166,18 @@ async function receiveLocked(
             await logFile.writeFile(chunk);
             await Bun.write(Bun.stderr, chunk).catch(() => {});
           },
+        );
+        await prune(store, docker, app, (row) =>
+          rm(
+            join(
+              root,
+              "releases",
+              app.name,
+              branchSlug(row.branch),
+              `v${row.number}`,
+            ),
+            { recursive: true, force: true },
+          ),
         );
       } finally {
         await logFile.close();

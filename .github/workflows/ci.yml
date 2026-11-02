@@ -29,7 +29,7 @@ jobs:
         run: |
           set -o pipefail
           bun run test:e2e 2>&1 | tee /tmp/hoist-e2e.log
-          grep -Fx ' 13 pass' /tmp/hoist-e2e.log
+          ! grep -Eq '^\((fail|skip)\)' /tmp/hoist-e2e.log && grep -Eq '^\(pass\)' /tmp/hoist-e2e.log
           grep -Fx ' 0 fail' /tmp/hoist-e2e.log
           skip_summary=$(awk '/^\(skip\)/ { count++ } END { printf " %d skip", count }' /tmp/hoist-e2e.log)
           printf '%s\n' "$skip_summary" >> /tmp/hoist-e2e.log

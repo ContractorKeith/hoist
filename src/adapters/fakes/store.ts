@@ -7,6 +7,34 @@ import type {
 } from "../../store/interface";
 
 export class FakeStore implements Store {
+  private key = crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+  secretKey(): Promise<CryptoKey> {
+    return this.key;
+  }
+  readonly configRows = new Map<number, Record<string, string>>();
+  config(id: number): Record<string, string> {
+    return { ...this.configRows.get(id) };
+  }
+  setConfig(id: number, key: string, value: string): void {
+    this.configRows.set(id, { ...this.config(id), [key]: value });
+  }
+  unsetConfig(id: number, key: string): void {
+    const values = this.config(id);
+    delete values[key];
+    this.configRows.set(id, values);
+  }
+  setRetention(id: number, retention: number): void {
+    const app = this.appRows.find((a) => a.id === id);
+    if (app) app.retention = retention;
+  }
+  markPruned(id: number): void {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.pruned_at = new Date().toISOString();
+  }
   readonly lockRows = new Map<string, LockRow>();
   lock(name: string): LockRow | null {
     return structuredClone(this.lockRows.get(name) ?? null);

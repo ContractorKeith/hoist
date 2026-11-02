@@ -25,7 +25,7 @@ export function reserveRelease(
       number,
       git_sha: sha,
       image: `hoist/${app.name}:${slug}-v${number}-${sha.slice(0, 12)}`,
-      config_json: "{}",
+      config_json: JSON.stringify(store.config(app.id)),
       status: "building",
     });
   });

@@ -13,8 +13,10 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 M0 done — 2026-11-01 (#9): toolchain, schema, adapter seams, e2e harness, CI. M1 done —
 2026-11-01 (#14): HOIST_DIR layout, apps verbs, SSH forced-command dispatch, pre-receive hook
 building `hoist/<app>:<slug>-v<n>-<sha12>` into a `built` release, migration 2, user-mode sshd
-e2e. M2 (cutover, Caddy routes, TLS, boot reconcile) in progress —
-[draft PR #19](https://github.com/ContractorKeith/hoist/pull/19).
+e2e. M2 done — 2026-11-01 ([PR #19](https://github.com/ContractorKeith/hoist/pull/19)):
+cutover, Caddy routes, TLS and boot reconcile. M3 (config, rollback, retention) in progress.
+M4 (logs) in progress — [draft PR #20](https://github.com/ContractorKeith/hoist/pull/20).
+M5 (previews) in progress — [draft PR #21](https://github.com/ContractorKeith/hoist/pull/21).
 
 ## Commands
 
@@ -58,6 +60,13 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - The SQLite `serve` lease enforces one supervisor per HOIST_DIR and records child_pid; after a crash, reap only the recorded pinned Caddy child for this directory before restarting.
 - A Caddy restart during a push may fail its route write; the hook fails that release and removes its candidate.
 - Five consecutive Caddy exits under 10 s fail serve with exit code and a 50-line stderr tail; shutdown/not-ready cleanup escalates SIGTERM to SIGKILL after 5 s.
+- `HOIST_DIR/secret.key` is a generated 32-byte key (0600). Back it up with the database;
+  config values and immutable release snapshots contain AES-256-GCM ciphertext at rest.
+- `restart` and `rollback` create new numbered releases through the same locked cutover as a push.
+  Restart uses current config; rollback copies the target image and encrypted config snapshot.
+- Retention defaults to five newest live/stopped/built releases per app and branch. Pruning
+  preserves live releases and shared image tags, removes old logs, and records `pruned_at`.
+  Failed release logs remain; their unreferenced images are removed best effort.
 - One process. Caddy is a supervised child; the preview sweeper is a timer. No queue.
 - A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
   change during cutover. Delete is governed by retention (M3).
