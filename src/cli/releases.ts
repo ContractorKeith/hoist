@@ -94,7 +94,15 @@ export async function releasesCommand(
           console.log(line);
         },
       );
-      await prune(store, docker, app, removeReleaseLogs(root, app.name));
+      await prune(
+        store,
+        docker,
+        app,
+        removeReleaseLogs(root, app.name),
+        async (message) => {
+          await file.writeFile(`${message}\n`);
+        },
+      );
     } finally {
       await file.close();
     }

@@ -29,7 +29,7 @@ export interface Release {
   status: "building" | "built" | "failed" | "live" | "stopped";
 }
 export interface Store {
-  secretKey(): Promise<CryptoKey>;
+  secretKey(verifyFile?: boolean): Promise<CryptoKey>;
   config(appId: number): Record<string, string>;
   setConfig(appId: number, key: string, value: string): void;
   unsetConfig(appId: number, key: string): void;

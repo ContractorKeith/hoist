@@ -158,6 +158,7 @@ test("AAD refuses config and snapshot ciphertext moved to another app or key", a
   const ciphertext = store.config(app.id).A;
   if (!ciphertext) throw new Error("missing ciphertext");
   const key = await store.secretKey();
+  expect(await decrypt(key, ciphertext, app.id, "A")).toBe("bound value");
   await expect(decrypt(key, ciphertext, app.id + 1, "A")).rejects.toThrow(
     "Cannot decrypt config;",
   );

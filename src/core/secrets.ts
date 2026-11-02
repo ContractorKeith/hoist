@@ -68,3 +68,22 @@ export async function decryptConfig(
     ),
   );
 }
+
+// Check current and historical values before introducing any new ciphertext.
+export async function validateConfigKey(store: Store): Promise<CryptoKey> {
+  const key = await store.secretKey(true);
+  for (const app of store.apps()) {
+    const snapshots = [
+      JSON.stringify(store.config(app.id)),
+      ...store.releases(app.id).map((row) => row.config_json),
+    ];
+    for (const snapshot of snapshots) {
+      for (const [name, value] of Object.entries(
+        JSON.parse(snapshot) as Record<string, string>,
+      )) {
+        await decrypt(key, value, app.id, name);
+      }
+    }
+  }
+  return key;
+}

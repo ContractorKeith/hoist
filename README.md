@@ -129,7 +129,9 @@ ssh hoist@server hoist apps:set hello retention=10
 Saving config takes effect on the next push or restart. Keys are uppercase identifiers;
 values may contain `=` and may be empty, with a 64 KiB limit and no NUL. Config values and
 release snapshots are encrypted with AES-256-GCM. The generated 32-byte
-`$HOIST_DIR/secret.key` is private (0600); back it up with the database.
+`$HOIST_DIR/secret.key` is private (0600). Back up `secret.key`; losing it loses every
+config value. A missing key is generated only when no current or historical encrypted
+config exists; otherwise restore it from backup. Non-regular key files are refused.
 Only `--reveal` and container startup decrypt values.
 
 Restart creates a new numbered main release from the live image and current config.
@@ -140,6 +142,8 @@ whose images are gone. A shared image can still be rolled back to after its old 
 
 After successful cutover, retention keeps the newest five live/stopped/built releases
 per app and branch by default (`retention=1..100`). The live release is always protected.
+Prune is best effort after cutover: cleanup errors warn in the new release log and stderr
+without rejecting the push, restart or rollback.
 Older releases get `pruned_at`; their log directories and unreferenced image tags are
 removed. Shared image tags used by retained rollbacks stay. Failed releases are marked pruned
 after image cleanup is attempted, while their log directories stay for M4. Masked config

@@ -1,6 +1,6 @@
 import type { CaddyAdmin, DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
-import { decryptConfig } from "./secrets";
+import { decryptConfig, validateConfigKey } from "./secrets";
 import { healthPath } from "./validation";
 
 export type HealthCheck = (port: number, path: string) => Promise<void>;
@@ -41,6 +41,7 @@ async function startHealthy(
   let id: string | undefined;
   try {
     healthPath(app.health_path);
+    if (release.config_json !== "{}") await validateConfigKey(store);
     const config = await decryptConfig(store, app.id, release.config_json);
     const port = appPort(await docker.imagePorts(release.image), config);
     await log("Starting new container");

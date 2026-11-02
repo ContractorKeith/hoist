@@ -75,3 +75,30 @@ test("wrong config key fails the candidate before creating a container", async (
     false,
   );
 });
+
+test("cutover refuses existing damaged config even when its own snapshot decrypts", async () => {
+  const store = new FakeStore(),
+    docker = new FakeDocker(),
+    caddy = new FakeCaddy();
+  const app = store.createApp("hello", "hello.test", "/");
+  await configCommand(store, ["config:set", "hello", "A=valid"], () => {});
+  const release = reserveRelease(store, app, "main", "a".repeat(40));
+  store.completeRelease(release.id);
+  store.setConfig(app.id, "B", "v1:damaged:ciphertext");
+  await expect(
+    cutover(
+      store,
+      docker,
+      caddy,
+      app,
+      release,
+      null,
+      async () => null,
+      async () => {},
+    ),
+  ).rejects.toThrow("Cannot decrypt config;");
+  expect(release.status).toBe("failed");
+  expect(docker.calls.some((call) => call.method === "createContainer")).toBe(
+    false,
+  );
+});

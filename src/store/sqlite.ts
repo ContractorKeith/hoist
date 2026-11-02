@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { keyfile } from "../adapters/keyfile";
+import { keyfile, verifyKeyfile } from "../adapters/keyfile";
 import { privatePath } from "../data";
 import type { App, LockClaim, LockRow, Release, Store } from "./interface";
 import { migrations, schemaVersion } from "./migrations";
@@ -48,9 +48,30 @@ export class SqliteStore implements Store {
   }
 
   private key?: Promise<CryptoKey>;
-  secretKey(): Promise<CryptoKey> {
-    this.key ??= keyfile(this.dataDir);
-    return this.key;
+  private hasEncryptedConfig(): boolean {
+    return !!this.db
+      .query<{ encrypted: number }, []>(
+        "SELECT EXISTS(SELECT 1 FROM config UNION ALL SELECT 1 FROM releases WHERE config_json <> '{}') AS encrypted",
+      )
+      .get()?.encrypted;
+  }
+  secretKey(verifyFile = false): Promise<CryptoKey> {
+    this.key ??= keyfile(this.dataDir, () => !this.hasEncryptedConfig());
+    if (!verifyFile) return this.key;
+    return this.key.then(async (key) => {
+      try {
+        await verifyKeyfile(this.dataDir, key);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if (this.hasEncryptedConfig())
+          throw new Error(
+            "secret.key is missing but encrypted config exists; restore the key from backup",
+          );
+        this.key = undefined;
+        return this.secretKey(true);
+      }
+      return key;
+    });
   }
   config(appId: number): Record<string, string> {
     return Object.fromEntries(

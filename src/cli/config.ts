@@ -1,5 +1,5 @@
 import { knownApp } from "../core/apps";
-import { decrypt, encrypt } from "../core/secrets";
+import { decrypt, encrypt, validateConfigKey } from "../core/secrets";
 import { appName } from "../core/validation";
 import type { Store } from "../store/interface";
 
@@ -33,7 +33,7 @@ export async function configCommand(
   const app = knownApp(store, appName(name ?? ""));
   if (verb === "config:set") {
     const values = parseValues(rest),
-      key = await store.secretKey();
+      key = await validateConfigKey(store);
     const encrypted = await Promise.all(
       values.map(
         async ([name, value]) =>

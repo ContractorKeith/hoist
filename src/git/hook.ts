@@ -168,7 +168,15 @@ async function receiveLocked(
             await Bun.write(Bun.stderr, chunk).catch(() => {});
           },
         );
-        await prune(store, docker, app, removeReleaseLogs(root, app.name));
+        await prune(
+          store,
+          docker,
+          app,
+          removeReleaseLogs(root, app.name),
+          async (message) => {
+            await logFile.writeFile(`${message}\n`);
+          },
+        );
       } finally {
         await logFile.close();
       }
