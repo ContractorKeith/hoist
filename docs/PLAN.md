@@ -123,8 +123,8 @@ releases    id, app_id, branch, number, git_sha, image, config_json (encrypted),
 config      app_id, key, value (encrypted)       -- current config; snapshotted into releases
 previews    app_id, branch, slug, last_push_at    -- current release is the newest live release
                                                    for (app_id, branch)
-sessions    token_hash, expires_at
-settings    key (primary key), value           -- owner_password: Argon2id hash
+sessions    token_hash, expires_at, password_version
+settings    key (primary key), value           -- owner_password: Argon2id hash; password_version
 locks       name (primary key), owner_pid, heartbeat_at, acquired_at, child_pid (nullable)
 ```
 
@@ -140,8 +140,12 @@ than `pruned_at`, since retained releases may share an image tag.
 
 Dashboard tokens are random 32-byte values, stored as SHA-256 hashes with a seven-day expiry.
 The per-session CSRF token is derived from the cookie token; login uses a separate cookie
-challenge. Password replacement revokes existing sessions. Static assets and `/login` and
-`/healthz` are public; every dashboard page and stream requires a valid session.
+challenge. Password replacement atomically updates the hash and password version and deletes
+all sessions.
+Session creation rechecks the verified credentials inside an immediate transaction; validation
+rejects missing owner passwords, version mismatches and malformed/expired timestamps (deleting
+invalid rows). Migration 7 initializes the version and revokes unversioned sessions. Static
+assets and `/login` and `/healthz` are public; every dashboard page and stream requires a valid session.
 
 ## 7. CLI contract
 

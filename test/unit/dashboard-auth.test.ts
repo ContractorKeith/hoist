@@ -35,13 +35,20 @@ test("sessions persist only SHA-256, expire after seven days, revoke on logout a
       token_hash: hashToken(token),
     });
     expect(session(h.db, request("/", cookie), now)).toBe(token);
-    expect(session(h.db, request("/", cookie), now + 7 * 86400000)).toBeNull();
     expect((await h.handle(request("/logout", cookie, {}))).status).toBe(403);
     const response = await h.handle(
       request("/logout", cookie, { csrf: csrfToken(token) }),
     );
     expect(response.status).toBe(303);
     expect(session(h.db, request("/", cookie))).toBeNull();
+    const expiring = createSession(h.db, now);
+    expect(
+      session(
+        h.db,
+        request("/", `__Host-hoist_session=${expiring}`),
+        now + 7 * 86400000,
+      ),
+    ).toBeNull();
     const other = createSession(h.db);
     h.db.savePassword(await hashPassword("changed"));
     expect(

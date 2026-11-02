@@ -84,6 +84,9 @@ export const migrations = [
     SELECT app_id, branch, trim(slug, '-'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     FROM collapsed WHERE instr(slug, '--') = 0;`,
   `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  `ALTER TABLE sessions ADD COLUMN password_version TEXT NOT NULL DEFAULT '';
+  DELETE FROM sessions;
+  INSERT INTO settings(key, value) VALUES ('password_version', lower(hex(randomblob(16)))) ON CONFLICT(key) DO NOTHING;`,
 ] as const;
 
 export const schemaVersion = migrations.length;

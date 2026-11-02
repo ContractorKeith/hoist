@@ -235,7 +235,9 @@ are marked and truncated at 65,536 characters; the browser keeps the latest 200,
 loopback listener's default port 8700; Caddy provides HTTPS. Use a distinct port for each
 hoist data directory on the same machine.
 
-Sessions expire after seven days. Password changes revoke all sessions. Cookies are Secure,
+Sessions expire after seven days. Password changes atomically revoke all sessions and reject
+logins still verifying the old password. If no owner password is set, authenticated pages are
+disabled and the login page explains the CLI setup command. Cookies are Secure,
 HttpOnly and SameSite=Strict, forms carry CSRF tokens, and five failed logins block that client
 IP for 15 minutes. The rate limit resets when serve restarts. Config values never enter page
 HTML; log output is rendered as text. Through Caddy, the unauthenticated `/healthz` endpoint
@@ -245,7 +247,8 @@ IP address and keys login throttling.
 
 Dashboard cookies use the `__Host-` prefix, and pages refuse framing. Static assets are
 cached as public/immutable for one year; pages, errors and streams use `no-store`. The dashboard
-host is reserved: apps and previews cannot claim it.
+host is reserved: apps and previews cannot claim it. Legacy collisions are suppressed on boot
+and reconcile, and cannot be restored by cutover. Oversized forms return a secured HTML 413.
 
 ## Development
 

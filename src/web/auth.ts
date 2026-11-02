@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { DashboardStore } from "../store/dashboard";
+import type { DashboardStore, PasswordCredentials } from "../store/dashboard";
 
 export const hashToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
@@ -29,10 +29,20 @@ export function readCookie(
   const token = values.find(([key]) => key === name)?.[1] ?? "";
   return /^[a-f0-9]{64}$/.test(token) ? token : "";
 }
-export function createSession(store: DashboardStore, now = Date.now()) {
+export class PasswordChangedError extends Error {
+  constructor() {
+    super("Password changed; sign in again");
+  }
+}
+export function createSession(
+  store: DashboardStore,
+  now = Date.now(),
+  expected?: PasswordCredentials,
+) {
   const token = randomToken();
   const expires = new Date(now + 7 * 86400000).toISOString();
-  store.createSession(hashToken(token), expires);
+  if (!store.createSession(hashToken(token), expires, expected))
+    throw new PasswordChangedError();
   return token;
 }
 export function session(

@@ -35,6 +35,7 @@ export async function dashboardPassword(
   }
   if (!password || password.length > 1024 || /[\r\n\0]/.test(password))
     throw new Error("Password must be 1–1024 characters on one line");
+  // One immediate transaction changes the hash/version and revokes every session.
   new DashboardStore(store.db).savePassword(await hashPassword(password));
   console.log("Dashboard password saved");
 }

@@ -5,6 +5,7 @@ import type { SqliteStore } from "../store/sqlite";
 import { type Actions, eligibleReleases } from "./actions";
 import { assets } from "./assets";
 import { cookie, hashToken, LoginLimit, session, validCSRF } from "./auth";
+import { BodyTooLargeError, boundedRequest } from "./body";
 import { errorPage, html, redirect, withSecurityHeaders } from "./http";
 import { loginHandler } from "./login";
 import { logStream } from "./sse";
@@ -128,10 +129,14 @@ export function dashboard(
   return async (request: Request): Promise<Response> => {
     let response: Response;
     try {
-      response = await handle(request);
+      response = await handle(await boundedRequest(request));
     } catch (error) {
-      console.error(error);
-      response = errorPage("Request could not be completed", 400);
+      if (error instanceof BodyTooLargeError)
+        response = errorPage("Request body too large", 413);
+      else {
+        console.error(error);
+        response = errorPage("Request could not be completed", 400);
+      }
     }
     return withSecurityHeaders(response);
   };

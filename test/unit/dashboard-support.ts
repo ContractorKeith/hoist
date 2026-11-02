@@ -15,6 +15,13 @@ export async function setup(
     docker = new FakeDocker();
   const db = new DashboardStore(store.db),
     actions = new Actions(run);
+  db.savePassword(
+    await Bun.password.hash("pw", {
+      algorithm: "argon2id",
+      memoryCost: 1024,
+      timeCost: 1,
+    }),
+  );
   const handle = dashboard(store, docker, actions);
   return {
     root,

@@ -6,15 +6,14 @@ import { Docker } from "./adapters/docker";
 import { checkHealth } from "./adapters/health";
 import { stopOrphanCaddy } from "./adapters/orphan-caddy";
 import { stopChild } from "./adapters/process";
-import { hostName, port } from "./adapters/validation";
+import { port } from "./adapters/validation";
+import { bootRoutes } from "./core/boot-routes";
 import {
   type CaddySettings,
   caddyConfig,
   newestRoutes,
-  type ReleaseRoute,
 } from "./core/caddy-config";
-import { ownsContainer } from "./core/cutover";
-import { previewTTL, releaseHost, sweepPreviews } from "./core/previews";
+import { previewTTL, sweepPreviews } from "./core/previews";
 import { reconcile } from "./core/reconcile";
 import { dataRoot, privatePath } from "./data";
 import { finishSupervisor, scheduleSweep } from "./preview-timer";
@@ -114,33 +113,7 @@ export async function serve(): Promise<void> {
     let fastExits = 0;
     while (!stopping) {
       // Rebuild from the store on each restart; never replay a stale file after cutover.
-      const routes: ReleaseRoute[] = [];
-      for (const app of store.apps()) {
-        try {
-          hostName(app.domain);
-          for (const release of store
-            .releases(app.id)
-            .filter((row) => row.status === "live")) {
-            try {
-              const info = release.container_id
-                ? await docker.inspectContainer(release.container_id)
-                : null;
-              if (info?.running && ownsContainer(info, app, release))
-                routes.push({
-                  host: releaseHost(app, release.branch),
-                  upstream: `127.0.0.1:${info.port}`,
-                  releaseId: release.id,
-                });
-            } catch (error) {
-              console.error(
-                `${app.name} release ${release.id}: ${String(error)}`,
-              );
-            }
-          }
-        } catch (error) {
-          console.error(`${app.name}: ${String(error)}`);
-        }
-      }
+      const routes = await bootRoutes(store, docker, dashboard, console.error);
       await Bun.write(
         configPath,
         JSON.stringify(caddyConfig(settings, newestRoutes(routes), dashboard)),

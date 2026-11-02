@@ -1,5 +1,6 @@
 import type { CaddyAdmin, DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
+import { assertAppHost } from "./caddy-config";
 import { decryptConfig, validateConfigKey } from "./secrets";
 import { healthPath } from "./validation";
 
@@ -41,6 +42,7 @@ async function startHealthy(
 ): Promise<string> {
   let id: string | undefined;
   try {
+    assertAppHost(host);
     healthPath(app.health_path);
     if (release.config_json !== "{}") await validateConfigKey(store);
     const config = await decryptConfig(store, app.id, release.config_json);

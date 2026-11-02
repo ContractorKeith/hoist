@@ -7,6 +7,16 @@ import { Actions } from "./actions";
 import { errorPage, withSecurityHeaders } from "./http";
 import { dashboard } from "./router";
 
+export function allowRequest(
+  peer: string | undefined,
+  headers: Headers,
+): boolean {
+  return (
+    (peer === "127.0.0.1" || peer === "::1") &&
+    headers.get("x-forwarded-proto") === "https"
+  );
+}
+
 export function dashboardRoute() {
   const host = dashboardHost();
   hostName(host);
@@ -30,13 +40,17 @@ export function startDashboard(
     hostname: "127.0.0.1",
     port: options.port ?? route.port,
     idleTimeout: 0,
-    maxRequestBodySize: 16384,
+    // The handler owns the bounded read so even early 413 responses have security headers.
+    maxRequestBodySize: Infinity,
     fetch(request, server) {
       const peer = server.requestIP(request)?.address;
-      if (peer !== "127.0.0.1" && peer !== "::1")
-        return withSecurityHeaders(errorPage("Loopback required", 403));
-      if (request.headers.get("x-forwarded-proto") !== "https")
-        return withSecurityHeaders(errorPage("Caddy HTTPS required", 403));
+      if (!allowRequest(peer, request.headers)) {
+        const message =
+          peer === "127.0.0.1" || peer === "::1"
+            ? "Caddy HTTPS required"
+            : "Loopback required";
+        return withSecurityHeaders(errorPage(message, 403));
+      }
       return handle(request);
     },
   });
