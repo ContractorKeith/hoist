@@ -14,7 +14,8 @@ M0 done — 2026-11-01 (#9): toolchain, schema, adapter seams, e2e harness, CI. 
 2026-11-01 (#14): HOIST_DIR layout, apps verbs, SSH forced-command dispatch, pre-receive hook
 building `hoist/<app>:<slug>-v<n>-<sha12>` into a `built` release, migration 2, user-mode sshd
 e2e. M2 done — 2026-11-01 ([PR #19](https://github.com/ContractorKeith/hoist/pull/19)):
-cutover, Caddy routes, TLS and boot reconcile. M3 (config, rollback, retention) in progress.
+cutover, Caddy routes, TLS and boot reconcile. M3 (config, rollback, retention) in progress —
+[draft PR #22](https://github.com/ContractorKeith/hoist/pull/22).
 M4 (logs) in progress — [draft PR #20](https://github.com/ContractorKeith/hoist/pull/20).
 M5 (previews) in progress — [draft PR #21](https://github.com/ContractorKeith/hoist/pull/21).
 
