@@ -27,7 +27,7 @@ export const verbs = [
   "apps:info <name> [--json]",
   "apps:destroy <name> [--force]",
   "apps:set <name> retention=N|branch=<name>",
-  "config:set <name> K=V [K=V...]",
+  "config:set <name> K=V [K=V...] | <name> KEY --stdin",
   "config:unset <name> K",
   "config:list <name> [--reveal] [--json]",
   "releases <name> [--branch <b>] [--json]",

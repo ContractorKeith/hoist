@@ -67,6 +67,13 @@ hoist rollback hello v1              # copies v1's image AND config into a new r
 hoist apps:set hello retention=10
 ```
 
+SSH command arguments are limited to about 8 KiB and cannot contain control
+characters. For multi-line or long secrets (up to 64 KiB), pass the value on stdin:
+
+```sh
+hoist config:set hello PEM --stdin < private-key.pem
+```
+
 Config takes effect on the next push or restart. Back up `/var/lib/hoist/secret.key`
 with `hoist.db`; losing this key loses all encrypted config. Retention keeps five
 releases per branch by default and always protects the live release.
@@ -127,7 +134,7 @@ hoist apps:list [--json]
 hoist apps:info <name> [--json]
 hoist apps:destroy <name> [--force]
 hoist apps:set <name> retention=N|branch=<name>
-hoist config:set <name> K=V [K=V...]
+hoist config:set <name> K=V [K=V...] | <name> KEY --stdin
 hoist config:unset <name> K
 hoist config:list <name> [--reveal] [--json]
 hoist releases <name> [--branch <b>] [--json]

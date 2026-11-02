@@ -24,15 +24,36 @@ export function parseValues(args: string[]): [string, string][] {
     return [key, value];
   });
 }
+export async function configValues(
+  args: string[],
+  input: ReadableStream<Uint8Array>,
+): Promise<[string, string][]> {
+  if (!args.includes("--stdin")) return parseValues(args);
+  if (args.length !== 2 || args[1] !== "--stdin")
+    throw new Error("Usage: hoist config:set <app> KEY --stdin");
+  const key = configKey(args[0] ?? "");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of input) {
+    size += chunk.length;
+    if (size > 65536) throw new Error("Config stdin must be at most 64 KiB.");
+    chunks.push(chunk);
+  }
+  const value = Buffer.concat(chunks).toString("utf8").replace(/\n$/, "");
+  if (!value) throw new Error("Config stdin must not be empty.");
+  return parseValues([`${key}=${value}`]);
+}
+
 export async function configCommand(
   store: Store,
   args: string[],
   print = console.log,
+  input = Bun.stdin.stream(),
 ): Promise<void> {
   const [verb, name, ...rest] = args;
   const app = knownApp(store, appName(name ?? ""));
   if (verb === "config:set") {
-    const values = parseValues(rest),
+    const values = await configValues(rest, input),
       key = await validateConfigKey(store);
     const encrypted = await Promise.all(
       values.map(
