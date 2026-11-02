@@ -79,9 +79,10 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
   change during cutover. Delete is governed by retention (M3).
 - Dashboard binds only `127.0.0.1:8700` (`HOIST_DASHBOARD_PORT`); Caddy serves `hoist.<HOIST_DOMAIN>` (`HOIST_DASHBOARD_HOST` overrides). Set the owner password with `hoist dashboard:set-password` (stdin or hidden TTY prompt).
-- Dashboard sessions last seven days; tokens are SHA-256 hashed in SQLite, cookies are Secure/HttpOnly/SameSite=Strict. Password changes revoke sessions. Login permits five failures per client IP per 15 minutes.
-- Every dashboard mutation is POST with CSRF, including logout; rollback/restart require confirmation. CSP allows only same-origin scripts/styles; log lines use textContent. Config rendering queries key names only.
+- Dashboard sessions last seven days; tokens are SHA-256 hashed in SQLite, cookies use `__Host-` names with Secure/HttpOnly/SameSite=Strict. Password changes revoke sessions. Login permits five failures per client IP per 15 minutes.
+- Every dashboard mutation is POST with CSRF, including logout; rollback/restart require confirmation. CSP allows only same-origin scripts/styles, denies framing/base URLs and restricts forms to self; log lines use textContent. Config rendering queries key names only.
 - E2e harnesses use unique app names and dashboard ports. Under heavy load, run Docker e2e with `flock /home/contractorkeith/.t3/worktrees/hoist/hoist-e2e.lock`; use `newgrp docker` when needed.
+- Dashboard action waits share serve’s shutdown signal; web shutdown waits at most 30 s and reports interrupted jobs. Caddy must be the only proxy; the last valid forwarded IP keys login throttling. Static assets cache for one year; other responses are no-store.
 - Dashboard is read-mostly: rollback and restart are its only actions. Everything else is CLI.
 - Tooling is Bun, `tsc --noEmit`, Biome. No ESLint, Prettier, Vitest, or ORM.
 - One milestone = one issue = one branch = one PR = one T3 thread in its own worktree. M0 lands

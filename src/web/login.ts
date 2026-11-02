@@ -9,26 +9,35 @@ import {
   validCSRF,
   verifyPassword,
 } from "./auth";
-import { html, redirect } from "./http";
+import { errorPage, html, redirect } from "./http";
 import { login } from "./templates";
 export function loginHandler(db: DashboardStore, limit: LoginLimit) {
   return async (request: Request): Promise<Response> => {
     if (request.method === "GET") {
       // Keep open forms valid when another tab or an asset redirect requests login.
-      const token = readCookie(request, "hoist_login") || randomToken();
+      const token = readCookie(request, "__Host-hoist_login") || randomToken();
       return html(login(token), 200, {
-        "Set-Cookie": cookie("hoist_login", token, 900),
+        "Set-Cookie": cookie("__Host-hoist_login", token, 900),
       });
     }
     if (request.method !== "POST")
-      return new Response("Method not allowed", { status: 405 });
+      return errorPage("Method not allowed", 405, undefined, "/login");
     const form = await request.formData(),
-      challenge = readCookie(request, "hoist_login");
+      challenge = readCookie(request, "__Host-hoist_login");
     if (!challenge || !validCSRF(challenge, form.get("csrf")))
-      return new Response("Invalid CSRF token", { status: 403 });
-    const ip = request.headers.get("x-forwarded-for") ?? "";
+      return errorPage("Invalid CSRF token", 403, undefined, "/login");
+    const ip =
+      (request.headers.get("x-forwarded-for") ?? "")
+        .split(",")
+        .at(-1)
+        ?.trim() ?? "";
     if (!isIP(ip))
-      return new Response("Caddy client address required", { status: 400 });
+      return errorPage(
+        "Caddy client address required",
+        400,
+        undefined,
+        "/login",
+      );
     if (limit.blocked(ip))
       return html(
         login(challenge, "Too many attempts. Try again in 15 minutes."),
@@ -47,7 +56,11 @@ export function loginHandler(db: DashboardStore, limit: LoginLimit) {
       return html(login(challenge, "Password refused."), 401);
     limit.clear(ip);
     return redirect("/", {
-      "Set-Cookie": cookie("hoist_session", createSession(db), 7 * 86400),
+      "Set-Cookie": cookie(
+        "__Host-hoist_session",
+        createSession(db),
+        7 * 86400,
+      ),
     });
   };
 }

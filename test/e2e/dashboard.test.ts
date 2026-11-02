@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { csrf, dashboardClient } from "./dashboard-client";
+import { checkBrowserLogs } from "./dashboard-browser";
+import {
+  csrf,
+  dashboardAssetsAndStream,
+  dashboardClient,
+} from "./dashboard-client";
 import { eventually } from "./harness";
 import { withSSH } from "./ssh";
 
@@ -74,6 +79,13 @@ scenario(
       expect(body).not.toContain(String(secret.length));
       expect(body).toContain("v1");
       expect(body).toContain("v2");
+      const logsPath = `${base}/logs`;
+      const streamPath = await dashboardAssetsAndStream(
+        client,
+        cookie,
+        logsPath,
+      );
+      await checkBrowserLogs(h, logsPath, cookie);
       const token = csrf(body);
       expect(
         (await client(`${base}/rollback`, cookie, { target: "v1" })).status,
@@ -86,7 +98,7 @@ scenario(
       for (let i = 0; i < 8; i++) {
         const abort = new AbortController();
         const stream = await client(
-          `${base}/logs/stream?branch=main`,
+          streamPath,
           cookie,
           undefined,
           abort.signal,

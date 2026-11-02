@@ -5,6 +5,7 @@ import { hostName } from "../adapters/validation";
 import { privatePath } from "../data";
 import type { App, Store } from "../store/interface";
 import { removeImages } from "./build";
+import { dashboardHost } from "./caddy-config";
 import { removeReleaseLogs } from "./logs";
 import { branchSlug } from "./validation";
 
@@ -98,6 +99,8 @@ export function availableHost(
   host: string,
   owner?: number,
 ): void {
+  if (host === dashboardHost())
+    throw new Error(`host ${host} is reserved for the dashboard`);
   for (const app of store.apps()) {
     if (app.id === owner) continue;
     if (

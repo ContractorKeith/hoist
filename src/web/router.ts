@@ -5,7 +5,7 @@ import type { SqliteStore } from "../store/sqlite";
 import { type Actions, eligibleReleases } from "./actions";
 import { assets } from "./assets";
 import { cookie, hashToken, LoginLimit, session, validCSRF } from "./auth";
-import { html, redirect, securityHeaders } from "./http";
+import { errorPage, html, redirect, withSecurityHeaders } from "./http";
 import { loginHandler } from "./login";
 import { logStream } from "./sse";
 import {
@@ -34,7 +34,10 @@ export function dashboard(
       const asset = assets[path];
       if (asset)
         return new Response(asset[0], {
-          headers: { "Content-Type": asset[1] },
+          headers: {
+            "Content-Type": asset[1],
+            "Cache-Control": "public, max-age=31536000, immutable",
+          },
         });
     }
     if (path === "/login") return handleLogin(request);
@@ -43,16 +46,16 @@ export function dashboard(
     if (request.method === "POST") {
       const form = await request.formData();
       if (!validCSRF(token, form.get("csrf")))
-        return new Response("Invalid CSRF token", { status: 403 });
+        return errorPage("Invalid CSRF token", 403, token);
       if (path === "/logout") {
         db.deleteSession(hashToken(token));
         return redirect("/login", {
-          "Set-Cookie": cookie("hoist_session", "", 0),
+          "Set-Cookie": cookie("__Host-hoist_session", "", 0),
         });
       }
       const match = /^\/apps\/([a-z0-9-]+)\/(rollback|restart)$/.exec(path);
       const app = match?.[1] ? store.app(match[1]) : null;
-      if (!match || !app) return new Response("Not found", { status: 404 });
+      if (!match || !app) return errorPage("Not found", 404, token);
       const action = match[2] ?? "",
         target = String(form.get("target") ?? ""),
         base = `/apps/${app.name}`;
@@ -62,18 +65,11 @@ export function dashboard(
           (row) => `v${row.number}` === target,
         )
       )
-        return html(
-          page(
-            "Rollback unavailable",
-            "<p>Choose an available release from the app page.</p>",
-            token,
-          ),
-          400,
-        );
+        return errorPage("Rollback unavailable", 400, token, base);
       if (form.get("confirmed") !== "yes")
         return html(confirmation(base, action, target, token));
       if (!actions.start(app.name, hashToken(token), action, target))
-        return new Response("An action is already running", { status: 409 });
+        return errorPage("An action is already running", 409, token, base);
       return html(
         page(
           "Release progress",
@@ -83,12 +79,12 @@ export function dashboard(
       );
     }
     if (request.method !== "GET")
-      return new Response("Method not allowed", { status: 405 });
+      return errorPage("Method not allowed", 405, token);
     if (path === "/") return html(page("Apps", appList(store), token));
     const match =
       /^\/apps\/([a-z0-9-]+)(?:\/(logs(?:\/stream)?|status))?$/.exec(path);
     const app = match?.[1] ? store.app(match[1]) : null;
-    if (!app) return new Response("Not found", { status: 404 });
+    if (!app) return errorPage("Not found", 404, token);
     const base = `/apps/${app.name}`;
     if (match?.[2] === "status") {
       const job = actions.status(app.name, hashToken(token));
@@ -135,12 +131,8 @@ export function dashboard(
       response = await handle(request);
     } catch (error) {
       console.error(error);
-      response = new Response("Request could not be completed", {
-        status: 400,
-      });
+      response = errorPage("Request could not be completed", 400);
     }
-    for (const [key, value] of Object.entries(securityHeaders))
-      response.headers.set(key, value);
-    return response;
+    return withSecurityHeaders(response);
   };
 }

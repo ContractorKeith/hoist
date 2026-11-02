@@ -98,7 +98,7 @@ export async function serve(): Promise<void> {
     });
     shutdown.signal.throwIfAborted();
     await docker.ping();
-    web = startDashboard(root, store, docker);
+    web = startDashboard(root, store, docker, { signal: shutdown.signal });
     const binary = await ensureCaddy();
     const configPath = privatePath(
       join(root, "caddy.json"),

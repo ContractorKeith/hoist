@@ -30,7 +30,7 @@ test("sessions persist only SHA-256, expire after seven days, revoke on logout a
   try {
     const now = Date.now(),
       token = createSession(h.db, now),
-      cookie = `hoist_session=${token}`;
+      cookie = `__Host-hoist_session=${token}`;
     expect(h.store.db.query("SELECT token_hash FROM sessions").get()).toEqual({
       token_hash: hashToken(token),
     });
@@ -44,7 +44,9 @@ test("sessions persist only SHA-256, expire after seven days, revoke on logout a
     expect(session(h.db, request("/", cookie))).toBeNull();
     const other = createSession(h.db);
     h.db.savePassword(await hashPassword("changed"));
-    expect(session(h.db, request("/", `hoist_session=${other}`))).toBeNull();
+    expect(
+      session(h.db, request("/", `__Host-hoist_session=${other}`)),
+    ).toBeNull();
   } finally {
     await h.close();
   }

@@ -37,7 +37,7 @@ test("templates escape untrusted branches and show only config names, releases a
     const row = reserveRelease(h.store, app, "<img>", "a".repeat(40));
     h.store.completeRelease(row.id);
     const token = createSession(h.db),
-      cookie = `hoist_session=${token}`;
+      cookie = `__Host-hoist_session=${token}`;
     const response = await h.handle(request("/apps/hello", cookie)),
       body = await response.text();
     expect(body).toContain("SECRET");
@@ -77,7 +77,7 @@ test("actions require confirmation, poll progress, serialize and report failure 
   try {
     h.store.createApp("hello", "hello.test", "/");
     const token = createSession(h.db),
-      cookie = `hoist_session=${token}`,
+      cookie = `__Host-hoist_session=${token}`,
       form = { csrf: csrfToken(token) };
     expect(
       await (
@@ -120,7 +120,7 @@ test("failed actions show a safe error sentence and never reflect the thrown val
   try {
     h.store.createApp("hello", "hello.test", "/");
     const token = createSession(h.db),
-      cookie = `hoist_session=${token}`;
+      cookie = `__Host-hoist_session=${token}`;
     await h.handle(
       request("/apps/hello/restart", cookie, {
         csrf: csrfToken(token),

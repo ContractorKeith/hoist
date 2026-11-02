@@ -19,7 +19,10 @@ export const verifyPassword = (password: string, hash: string) =>
   Bun.password.verify(password, hash);
 export const cookie = (name: string, token: string, age: number) =>
   `${name}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${age}`;
-export function readCookie(request: Request, name = "hoist_session"): string {
+export function readCookie(
+  request: Request,
+  name = "__Host-hoist_session",
+): string {
   const values = (request.headers.get("cookie") ?? "")
     .split(";")
     .map((part) => part.trim().split("="));

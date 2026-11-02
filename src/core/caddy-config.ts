@@ -83,3 +83,11 @@ export function caddyConfig(
     },
   };
 }
+
+// Shared routing namespace: CLI host reservations and serve resolve the same host.
+export function dashboardHost(): string {
+  return (
+    process.env.HOIST_DASHBOARD_HOST ??
+    `hoist.${process.env.HOIST_DOMAIN ?? "localhost"}`
+  );
+}
