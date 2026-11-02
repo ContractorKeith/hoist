@@ -1,7 +1,7 @@
 import { lstat, rm } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { DockerClient } from "../adapters/interfaces";
-import type { Store } from "../store/interface";
+import type { Release, Store } from "../store/interface";
 import { knownApp } from "./apps";
 import { appName, branchSlug } from "./validation";
 
@@ -69,16 +69,27 @@ export type LiveLogOptions = {
   follow: boolean;
 };
 
-// Runtime logs stay as bytes; M6 can reuse this with its own output sink and signal.
+// Only cancellation errors caused by our signal may be suppressed.
+function cancelled(error: unknown, reason: unknown): boolean {
+  if (error === reason) return true;
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  return (
+    error instanceof Error &&
+    error.cause !== undefined &&
+    cancelled(error.cause, reason)
+  );
+}
+
+// Reattach when recovery changes a container; replacement releases end the session.
 export async function liveLogs(
   store: Store,
   docker: DockerClient,
   options: LiveLogOptions,
   signal: AbortSignal,
   write: (chunk: Uint8Array) => Promise<void>,
-): Promise<void> {
+): Promise<number> {
   const app = knownApp(store, appName(options.app));
-  branchSlug(options.branch);
+  const slug = branchSlug(options.branch);
   if (
     !Number.isInteger(options.lines) ||
     options.lines < 1 ||
@@ -88,70 +99,96 @@ export async function liveLogs(
   const live = () =>
     store
       .releases(app.id)
-      .find((row) => row.branch === options.branch && row.status === "live");
-  const release = live();
+      .find((row) => branchSlug(row.branch) === slug && row.status === "live");
+  let release = live();
   if (!release?.container_id)
     throw new Error(`No live release for ${app.name} branch ${options.branch}`);
-  if (signal.aborted) return;
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal.addEventListener("abort", abort, { once: true });
-  let takeover: number | undefined;
-  let pollError: unknown;
-  const timer = options.follow
-    ? setInterval(() => {
-        try {
-          const next = live();
-          if (next && next.id !== release.id) {
-            takeover = next.number;
-            controller.abort();
+  while (!signal.aborted) {
+    const attached: Release = { ...release };
+    const controller = new AbortController();
+    const transition = Symbol("log transition");
+    const abort = () => controller.abort(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    let ended = false,
+      closedPolls = 0;
+    let next: Release = attached;
+    let message = "",
+      code = 0,
+      pollError: unknown;
+    const timer = options.follow
+      ? setInterval(() => {
+          try {
+            const current = live();
+            if (!current?.container_id) {
+              message = `--- app ${app.name} has no live release ---`;
+              code = 1;
+            } else if (current.id !== attached.id)
+              message = `--- release v${current.number} took over ---`;
+            else if (current.container_id !== attached.container_id)
+              next = current;
+            else if (ended && ++closedPolls >= 2) {
+              message = "--- container exited ---";
+              code = 1;
+            } else return;
+            controller.abort(transition);
+          } catch (error) {
+            pollError = error;
+            controller.abort(error);
           }
-        } catch (error) {
-          pollError = error;
-          controller.abort();
-        }
-      }, 2000)
-    : undefined;
-  try {
-    const stream = await docker.containerLogs(
-      release.container_id,
-      options.follow,
-      controller.signal,
-      options.lines,
-    );
-    const reader = stream.getReader();
-    const cancel = () => {
-      void reader.cancel().catch(() => {});
-    };
-    controller.signal.addEventListener("abort", cancel, { once: true });
+        }, 2000)
+      : undefined;
     try {
-      if (controller.signal.aborted) cancel();
-      while (!controller.signal.aborted) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        await write(stripCarriageReturns(value));
+      const stream = await docker.containerLogs(
+        attached.container_id as string,
+        options.follow,
+        controller.signal,
+        options.lines,
+      );
+      const reader = stream.getReader();
+      const cancel = () => {
+        void reader.cancel(controller.signal.reason).catch(() => {});
+      };
+      controller.signal.addEventListener("abort", cancel, { once: true });
+      try {
+        if (controller.signal.aborted) cancel();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            ended = true;
+            break;
+          }
+          if (controller.signal.aborted) break;
+          await write(stripCarriageReturns(value));
+        }
+        if (options.follow && !controller.signal.aborted)
+          await new Promise<void>((resolve) =>
+            controller.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            }),
+          );
+      } finally {
+        controller.signal.removeEventListener("abort", cancel);
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
       }
-      // Docker may close the old stream before cutover updates the live row.
-      if (options.follow && !controller.signal.aborted)
-        await new Promise<void>((resolve) =>
-          controller.signal.addEventListener("abort", () => resolve(), {
-            once: true,
-          }),
-        );
+    } catch (error) {
+      const expected =
+        controller.signal.aborted &&
+        (controller.signal.reason === transition ||
+          (signal.aborted && controller.signal.reason === signal.reason));
+      if (!expected || !cancelled(error, controller.signal.reason)) throw error;
     } finally {
-      controller.signal.removeEventListener("abort", cancel);
-      await reader.cancel().catch(() => {});
-      reader.releaseLock();
+      if (timer) clearInterval(timer);
+      signal.removeEventListener("abort", abort);
     }
-  } catch (error) {
-    if (!controller.signal.aborted) throw error;
-  } finally {
-    if (timer) clearInterval(timer);
-    signal.removeEventListener("abort", abort);
+    if (pollError) throw pollError;
+    if (signal.aborted) return 0;
+    if (message) {
+      await write(new TextEncoder().encode(`${message}\n`));
+      return code;
+    }
+    if (!options.follow) return 0;
+    release = next;
   }
-  if (pollError) throw pollError;
-  if (takeover !== undefined && !signal.aborted)
-    await write(
-      new TextEncoder().encode(`--- release v${takeover} took over ---\n`),
-    );
+  return 0;
 }

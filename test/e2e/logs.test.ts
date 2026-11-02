@@ -25,6 +25,7 @@ scenario(
         "Live: https://",
       ])
         expect(saved.stdout).toContain(text);
+      expect(saved.stdout).not.toContain('{"stream":');
       await writeFile(
         join(h.source, "Dockerfile"),
         "FROM busybox:1.37.0\nRUN hoist_missing_command\n",
@@ -57,13 +58,23 @@ scenario(
   async () => {
     await withSSH(async (h) => {
       await h.control("apps:create", "hello");
-      // Busybox httpd's verbose access log goes to the container's merged TTY output.
+      // CGI writes a unique request marker to the container TTY; health checks stay quiet.
       await writeFile(
         join(h.source, "Dockerfile"),
-        'FROM busybox:1.37.0\nWORKDIR /www\nCOPY index.html .\nEXPOSE 8080\nCMD ["sh", "-c", "echo ready; exec httpd -f -vv -p 8080 -h /www"]\n',
+        'FROM busybox:1.37.0\nWORKDIR /www\nCOPY index.html .\nCOPY log.cgi /www/cgi-bin/log\nRUN chmod +x /www/cgi-bin/log\nEXPOSE 8080\nCMD ["sh", "-c", "echo first; echo second; echo ready; exec httpd -f -p 8080 -h /www"]\n',
+      );
+      await writeFile(
+        join(h.source, "log.cgi"),
+        '#!/bin/sh\necho request-triggered > /proc/1/fd/1\nprintf "Content-Type: text/plain\\r\\n\\r\\nokay"\n',
       );
       await h.commit();
       expect((await h.push()).code).toBe(0);
+      expect((await h.control("logs", "hello", "-n", "1")).stdout).toBe(
+        "ready\n",
+      );
+      expect((await h.control("logs", "hello", "-n", "2")).stdout).toBe(
+        "second\nready\n",
+      );
       const child = Bun.spawn(
         [...h.ssh, h.remote, "hoist", "logs", "hello", "-f"],
         { stdout: "pipe", stderr: "pipe" },
@@ -80,9 +91,13 @@ scenario(
         });
         const start = output.length;
         const requestedAt = Date.now();
-        await h.request();
+        const app = h.store.app("hello");
+        const id = app && h.store.releases(app.id)[0]?.container_id;
+        if (!id) throw new Error("Missing live container");
+        const info = await h.docker.inspectContainer(id);
+        await fetch(`http://127.0.0.1:${info?.port}/cgi-bin/log`);
         await eventually(async () => {
-          expect(output.length).toBeGreaterThan(start);
+          expect(output.slice(start)).toContain("request-triggered");
         }, 1900);
         expect(Date.now() - requestedAt).toBeLessThan(2000);
         await writeFile(join(h.source, "index.html"), "second\n");

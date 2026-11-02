@@ -3,15 +3,20 @@ import { knownApp } from "../core/apps";
 import { checkLogPath, liveLogs, releaseLogPath } from "../core/logs";
 import { appName, branchSlug } from "../core/validation";
 import { dataRoot } from "../data";
+import type { App } from "../store/interface";
 import { SqliteStore } from "../store/sqlite";
 
 const usage =
   "Usage: hoist logs <app> [-f] [-n <lines>] [--release vN] [--branch <b>]";
-export function parseLogs(args: string[]) {
+export function defaultBranch(_app?: App): string {
+  return "main";
+}
+
+export function parseLogs(args: string[], app?: App) {
   const [name, ...rest] = args;
   const options = {
     app: appName(name ?? ""),
-    branch: "main",
+    branch: defaultBranch(app),
     lines: 100,
     follow: false,
     release: undefined as string | undefined,
@@ -54,7 +59,7 @@ export async function runLogs(args: string[]): Promise<number> {
   process.on("SIGINT", abort);
   process.on("SIGTERM", abort);
   try {
-    knownApp(store, options.app);
+    Object.assign(options, parseLogs(args, knownApp(store, options.app)));
     if (options.release) {
       const path = releaseLogPath(
         root,
@@ -71,7 +76,7 @@ export async function runLogs(args: string[]): Promise<number> {
       for await (const chunk of file.stream())
         await Bun.write(Bun.stdout, chunk);
     } else {
-      await liveLogs(
+      return await liveLogs(
         store,
         new Docker(),
         options,

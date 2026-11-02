@@ -160,12 +160,17 @@ ssh hoist@server hoist logs hello --branch feature-x
 ```
 
 Runtime output comes from Docker, defaults to the last 100 lines, and accepts `-n`
-from 1 to 10000. Bytes pass through with carriage returns removed. `-f` streams
-until Ctrl-C or another release takes over; takeover prints the new release number
-and exits successfully. The live release is checked every two seconds.
+from 1 to 10000. Carriage returns are removed unconditionally, so progress-bar
+redraws collapse; all other bytes pass through unchanged. `-f` checks the live
+release every two seconds. Ctrl-C and a release takeover exit 0 (takeover prints
+the new release number). If the app has no live release, it prints a notice and
+exits 1. If Docker closes the stream and nothing changes within two polls, it
+prints `--- container exited ---` and exits 1. Recovery that changes only the
+container ID reattaches automatically and continues following the same release.
 
 `--release vN` reads the complete build and cutover log at
 `$HOIST_DIR/releases/<app>/<branch-slug>/vN/build.log`, including failed pushes.
+Build records are decoded to plain text before saving and streaming to the pusher.
 It cannot be combined with `-f` or `-n`. The branch defaults to `main`.
 
 ## Development

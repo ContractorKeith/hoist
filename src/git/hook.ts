@@ -8,6 +8,7 @@ import {
   removeReleaseImages,
   reserveRelease,
 } from "../core/build";
+import { buildLogDecoder } from "../core/build-logs";
 import { cutover, type HealthCheck } from "../core/cutover";
 import { prune } from "../core/retention";
 import { branchSlug } from "../core/validation";
@@ -100,29 +101,34 @@ async function receiveLocked(
         );
         const logFile = await open(path, "a", 0o600);
         file = logFile;
-        await buildRelease(
-          store,
-          docker,
-          release,
-          app,
-          async () => {
-            context = await prepare(root, repo, sha, signal);
-            await requireDockerfile(context.path);
-            return context.path;
-          },
-          async (chunk) => {
-            await logFile.writeFile(chunk);
-            await Bun.write(Bun.stderr, chunk).catch(() => {});
-          },
-          signal,
-          async () => {
-            const current = await refsClient.head(repo, branch);
-            if ((current ?? "0".repeat(40)) !== oldSha)
-              throw new Error(
-                `branch ${branch} moved during build; push again`,
-              );
-          },
-        );
+        const decoded = buildLogDecoder(async (chunk) => {
+          await logFile.writeFile(chunk);
+          await Bun.write(Bun.stderr, chunk).catch(() => {});
+        });
+        try {
+          await buildRelease(
+            store,
+            docker,
+            release,
+            app,
+            async () => {
+              context = await prepare(root, repo, sha, signal);
+              await requireDockerfile(context.path);
+              return context.path;
+            },
+            decoded.write,
+            signal,
+            async () => {
+              const current = await refsClient.head(repo, branch);
+              if ((current ?? "0".repeat(40)) !== oldSha)
+                throw new Error(
+                  `branch ${branch} moved during build; push again`,
+                );
+            },
+          );
+        } finally {
+          await decoded.flush();
+        }
       } finally {
         try {
           await file?.close();

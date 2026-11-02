@@ -76,7 +76,8 @@ scenario(
           join(data, "releases/hello/main/v1/build.log"),
           "utf8",
         );
-        expect(log).toContain('"stream"');
+        expect(log).not.toContain('"stream"');
+        expect(log).toContain("Step 1/");
         expect(log).toContain("Swapping Caddy upstream");
         const remoteLog = result.stderr
           .replace(/\r/g, "")
