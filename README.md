@@ -92,7 +92,17 @@ hoist logs hello -f
 hoist logs hello --release v2         # saved build/cutover log, even for failed pushes
 git push hoist feature-x             # https://feature-x.hello.example.com
 hoist previews:list hello --json
-git push hoist :feature-x            # tears down the preview
+```
+
+Tear down the preview either by deleting the remote branch:
+
+```sh
+git push hoist :feature-x
+```
+
+Or by removing the preview through the CLI:
+
+```sh
 hoist previews:destroy hello feature-x
 ```
 
