@@ -26,6 +26,20 @@ export function releaseHost(app: App, branch: string): string {
     : previewHost(app, branch);
 }
 
+export function ownsPreview(store: Store, app: App, branch: string): boolean {
+  return (
+    store.previews(app.id).some((row) => row.branch === branch) ||
+    store.releases(app.id).some((row) => row.branch === branch)
+  );
+}
+
+export function requirePreview(store: Store, app: App, branch: string): void {
+  if (branch === (app.main_branch ?? "main"))
+    throw new Error("The main branch cannot be destroyed as a preview.");
+  if (!ownsPreview(store, app, branch))
+    throw new Error(`no preview ${branch} for ${app.name}`);
+}
+
 // Caller holds the app lease for the entire teardown.
 export async function destroyPreview(
   root: string,
@@ -34,9 +48,9 @@ export async function destroyPreview(
   caddy: CaddyAdmin,
   app: App,
   branch: string,
+  removeRef: () => Promise<void> = async () => {},
 ): Promise<void> {
-  if (branch === (app.main_branch ?? "main"))
-    throw new Error("The main branch cannot be destroyed as a preview.");
+  requirePreview(store, app, branch);
   const host = previewHost(app, branch);
   const releases = store.releases(app.id).filter((r) => r.branch === branch);
   if (
@@ -46,6 +60,7 @@ export async function destroyPreview(
   )
     return;
   store.stopBranchReleases(app.id, branch);
+  await removeRef();
   for (const container of await docker.listContainers({
     "hoist.app": app.name,
   })) {

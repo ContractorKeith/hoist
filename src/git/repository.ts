@@ -7,6 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
+import { appName, branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 
 export async function git(
@@ -133,3 +134,19 @@ export const gitRefs = {
       true,
     )) || null,
 };
+
+export async function deleteBranch(
+  root: string,
+  app: string,
+  branch: string,
+): Promise<void> {
+  appName(app);
+  branchSlug(branch);
+  await git([
+    "--git-dir",
+    join(root, "repos", `${app}.git`),
+    "update-ref",
+    "-d",
+    `refs/heads/${branch}`,
+  ]);
+}

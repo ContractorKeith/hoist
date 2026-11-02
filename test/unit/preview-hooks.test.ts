@@ -34,6 +34,7 @@ test("pre-receive preserves a deletion's resources; post-receive tears down only
         h.app,
         input,
         new AbortController().signal,
+        Date.now(),
         { head: async () => head, objectType: async () => "commit" },
       );
     // Git rejected the deletion, or a later push recreated the ref.

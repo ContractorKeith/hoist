@@ -7,9 +7,10 @@ import type {
   DockerClient,
 } from "../adapters/interfaces";
 import { knownApp } from "../core/apps";
-import { destroyPreview } from "../core/previews";
+import { destroyPreview, requirePreview } from "../core/previews";
 import { branchSlug } from "../core/validation";
 import { dataRoot } from "../data";
+import { deleteBranch } from "../git/repository";
 import { caddySettings } from "../server";
 import type { Store } from "../store/interface";
 import { SqliteStore } from "../store/sqlite";
@@ -42,6 +43,7 @@ export interface PreviewContext {
   caddy?: CaddyAdmin;
   locks: AppLocks;
   write: (message: string) => void;
+  deleteRef?: (branch: string) => Promise<void>;
 }
 export async function runPreviews(
   args: string[],
@@ -66,20 +68,29 @@ export async function runPreviews(
                 .join("\n"),
         );
       } else {
+        const branch =
+          store
+            .previews(app.id)
+            .find((row) => row.branch === args[2] || row.slug === args[2])
+            ?.branch ??
+          args[2] ??
+          "";
+        requirePreview(store, app, branch);
         await destroyPreview(
           root,
           store,
           context?.docker ?? new Docker(),
           context?.caddy ?? new Caddy(caddySettings(root).adminPort),
           app,
-          store
-            .previews(app.id)
-            .find((row) => row.branch === args[2] || row.slug === args[2])
-            ?.branch ??
-            args[2] ??
-            "",
+          branch,
+          () =>
+            context?.deleteRef
+              ? context.deleteRef(branch)
+              : deleteBranch(root, app.name, branch),
         );
-        write(`Destroyed preview ${name} ${args[2]}`);
+        write(
+          `Destroyed preview ${name} ${branch}; deleted refs/heads/${branch}; push again to recreate it`,
+        );
       }
     });
   } finally {

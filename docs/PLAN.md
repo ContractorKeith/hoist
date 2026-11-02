@@ -61,7 +61,7 @@ Ubuntu LTS server and in GitHub Actions.
 | 4 | CI: `tsc --noEmit`, Biome, `bun test`, e2e | v1 | M0 | Required check on every PR |
 | 5 | `apps:create`, `apps:list`, `apps:destroy` | v1 | M1 | Explicit create only; destroy prompts |
 | 6 | SSH forced command dispatching `git-receive-pack` and CLI verbs | v1 | M1 | One `authorized_keys` line per key, `command="hoist ssh-dispatch"` |
-| 7 | `pre-receive` builds Dockerfile into `hoist/<app>:<slug>-v<number>-<sha12>` and streams the log to the pusher | v1 | M1 | Dockerfile only; build log saved per release |
+| 7 | `pre-receive` builds Dockerfile into `hoist/<app>:<slug>-v<number>-<sha12>` and streams the log to the pusher | v1 | M1 | Dockerfile only; one branch update per push (deletions may be batched); build log saved per release |
 | 8 | Release row written on successful build: number, image, sha, branch, config snapshot | v1 | M1 | Immutable; see CONTEXT.md |
 | 9 | Cutover: start new container, health check, swap Caddy upstream, stop old | v1 | M2 | Default `GET /`, 2xx only (reject redirects to catch misconfigured paths), 30 s timeout, configurable path |
 | 10 | Caddy supervised by hoist; routes written via admin API; Let's Encrypt on by default | v1 | M2 | Internal CA when `HOIST_TLS=internal` (tests) |

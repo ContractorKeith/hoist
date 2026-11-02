@@ -35,7 +35,9 @@ test("teardown retries safely and a deleted branch cannot remove a reused slug",
     await destroyPreview(root, store, docker, caddy, app, "Feature/X");
     reserveRelease(store, app, "feature-x", "b".repeat(40));
     caddy.routes.set("feature-x.hello.test", "127.0.0.1:30001");
-    await destroyPreview(root, store, docker, caddy, app, "Feature/X");
+    await expect(
+      destroyPreview(root, store, docker, caddy, app, "Feature/X"),
+    ).rejects.toThrow("no preview Feature/X for hello");
     expect(store.previews(app.id)[0]?.branch).toBe("feature-x");
     expect(caddy.routes.get("feature-x.hello.test")).toBe("127.0.0.1:30001");
   } finally {

@@ -145,12 +145,14 @@ test("failed teardown after route removal cannot be resurrected by reconcile", a
   }
 });
 
-test("rowless route cleanup works and corrupt timestamps are skipped with a report", async () => {
+test("unowned routes are protected and corrupt timestamps are skipped with a report", async () => {
   const h = await previewFixture();
   try {
     h.caddy.routes.set("missing.blog.test", "127.0.0.1:30000");
-    await destroyPreview(h.root, h.store, h.docker, h.caddy, h.app, "missing");
-    expect(h.caddy.routes.has("missing.blog.test")).toBe(false);
+    await expect(
+      destroyPreview(h.root, h.store, h.docker, h.caddy, h.app, "missing"),
+    ).rejects.toThrow("no preview missing for blog");
+    expect(h.caddy.routes.has("missing.blog.test")).toBe(true);
     reserveRelease(h.store, h.app, "corrupt", "a".repeat(40));
     h.store.upsertPreview({
       app_id: h.app.id,

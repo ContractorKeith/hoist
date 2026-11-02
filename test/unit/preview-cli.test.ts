@@ -11,6 +11,9 @@ test("preview CLI JSON reads and branch/slug teardown run while holding the app 
   const output: string[] = [];
   const context = {
     ...h,
+    deleteRef: async () => {
+      expect(h.store.lock("app:blog")).not.toBeNull();
+    },
     write(message: string) {
       expect(h.store.lock("app:blog")).not.toBeNull();
       output.push(message);

@@ -18,6 +18,9 @@ import { logsCommand } from "./logs";
 import { previewsCommand } from "./previews";
 import { releasesCommand } from "./releases";
 
+// Compare recreation against process start, before delay or lease acquisition.
+const hookStartedAt = performance.timeOrigin;
+
 const commands: Record<
   string,
   (
@@ -98,6 +101,15 @@ export async function run(args: string[]): Promise<number> {
         const input = new TextDecoder().decode(Buffer.concat(chunks));
         const docker = new Docker(),
           caddy = new Caddy(caddySettings(root).adminPort);
+        if (args[1] === "post-receive" && process.env.HOIST_E2E !== undefined) {
+          const delay = Number(process.env.HOIST_TEST_HOOK_DELAY_MS ?? 0);
+          if (!Number.isInteger(delay) || delay < 0 || delay > 60000)
+            throw new Error("Invalid test hook delay");
+          if (delay) {
+            console.error("hoist: delaying post-receive for race test");
+            await Bun.sleep(delay);
+          }
+        }
         if (args[1] === "post-receive")
           await receiveDeleted(
             root,
@@ -108,6 +120,7 @@ export async function run(args: string[]): Promise<number> {
             app,
             input,
             controller.signal,
+            hookStartedAt,
           );
         else
           await receive(root, store, docker, app, input, controller.signal, {

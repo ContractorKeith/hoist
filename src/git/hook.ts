@@ -46,6 +46,11 @@ async function receiveLocked(
 ): Promise<void> {
   app = store.app(app.name) ?? app;
   const refs = parseRefs(input);
+  const updates = refs.filter((ref) => !/^0+$/.test(ref.sha));
+  if (updates.length > 1)
+    throw new Error(
+      `hoist deploys one branch per push; push ${updates.map((ref) => ref.branch).join(" and ")} separately`,
+    );
   if (
     refs.some(
       (ref) =>
@@ -130,7 +135,7 @@ async function receiveLocked(
         }
       }
     }
-    // Finish every build before any cutover, so a bad second ref cannot leave the first live.
+    // Finish the branch build before entering the cutover phase.
     for (const release of reserved) {
       const built = store.releases(app.id).find((row) => row.id === release.id);
       const ref = refs.find((row) => row.branch === release.branch);
