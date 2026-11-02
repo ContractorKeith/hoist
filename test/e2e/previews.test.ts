@@ -79,7 +79,6 @@ scenario(
       const started = Date.now();
       expect((await push(":feature-x")).code).toBe(0);
       const pushMs = Date.now() - started;
-      const returnedAt = Date.now();
       // Rows are deleted last, after all preview resources have been removed.
       await eventually(async () => {
         expect(
@@ -89,7 +88,7 @@ scenario(
           h.store.releases(app.id).some((r) => r.branch === "feature-x"),
         ).toBe(false);
       }, 10000);
-      const teardownMs = Date.now() - returnedAt;
+      const teardownMs = Date.now() - started;
       expect(teardownMs).toBeLessThan(10000);
       // Resource verification queries are outside the teardown deadline.
       await Promise.all([
@@ -104,7 +103,7 @@ scenario(
         assertPreviewGone(h, app, "feature-x", "feature-x", images),
       ]);
       console.log(
-        `Preview deletion: push completed in ${pushMs} ms; cleanup completed ${teardownMs} ms after push returned.`,
+        `Preview deletion: push completed in ${pushMs} ms; cleanup completed in ${teardownMs} ms from delete push.`,
       );
       const xyImages = h.store
         .releases(app.id)
