@@ -126,7 +126,12 @@ export async function cutover(
         row.status === "live" &&
         row.branch === release.branch &&
         row.id !== release.id,
-    );
+    )
+    .map((row) => ({ ...row }));
+  store.transaction(() => {
+    for (const row of old) store.setReleaseState(row.id, "stopped");
+    store.setReleaseState(release.id, "live", id);
+  });
   for (const row of old) {
     await log("Stopping previous container");
     if (row.container_id) {
@@ -138,10 +143,6 @@ export async function cutover(
       }
     }
   }
-  store.transaction(() => {
-    for (const row of old) store.setReleaseState(row.id, "stopped");
-    store.setReleaseState(release.id, "live", id);
-  });
   await log(`Live: https://${host}`);
 }
 

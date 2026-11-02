@@ -164,18 +164,18 @@ export async function serve(): Promise<void> {
         await Bun.sleep(50);
       }
       if (ready && !stopping) {
+        await reconcile(
+          store,
+          docker,
+          caddy,
+          locks,
+          checkHealth,
+          startedAt,
+          console.error,
+          shutdown.signal,
+          dashboard,
+        );
         if (boot) {
-          await reconcile(
-            store,
-            docker,
-            caddy,
-            locks,
-            checkHealth,
-            startedAt,
-            console.error,
-            shutdown.signal,
-            dashboard,
-          );
           boot = false;
           sweeper.start();
         }
