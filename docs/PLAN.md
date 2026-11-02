@@ -220,7 +220,7 @@ On a fresh Ubuntu 24.04 VM with a public IP and a wildcard DNS record:
 
 ## 11. Open questions
 
-- Health check for apps that do not serve `/` at all: `--health-path` covers it, but should a
-  TCP-connect fallback exist? Default no until a real app needs it.
+- Resolved for v0.1.0: health requires HTTP 2xx. Use `--health-path` for apps that do not
+  serve `/`; no TCP-connect fallback until a real app needs it.
 - Where the client CLI gets its `ssh` options (port, identity). Default: whatever `~/.ssh/config`
-  says for the host. Revisit at M7.
+  says for the host. Resolved at M7: no additional SSH option flags in the client.

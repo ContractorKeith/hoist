@@ -1,268 +1,163 @@
 # hoist
 
-A lightweight self-hosted PaaS for one Linux server. One Bun executable, Docker runtime,
-and a pinned Caddy binary. MIT. See [the plan](docs/PLAN.md) for the v1 scope.
+Push a Dockerfile to one Linux server. Hoist builds a numbered release, checks its
+health, then serves it over HTTPS with Caddy. A failed release leaves the current
+one serving. MIT licensed; one Bun executable, Docker, Git and pinned Caddy.
 
-M2 adds health-checked cutover, HTTPS routes, a Caddy supervisor and boot reconcile.
+## Install
 
-## Run the server
+Use a fresh Ubuntu 24.04 or Debian 12 server (x64 or arm64), with ports 22, 80 and
+443 open. Point `*.example.com` and `*.hello.example.com` at its IP; previews need
+the second wildcard. Hoist assumes this server's Docker daemon belongs to hoist.
 
-Run the compiled executable as the dedicated `hoist` account with Docker socket access:
+Download and inspect the versioned installer, then run as root:
 
-```bash
-HOIST_DIR=/var/lib/hoist HOIST_ACME_EMAIL=you@example.com hoist serve
+```sh
+curl -fLO https://github.com/ContractorKeith/hoist/releases/download/v0.1.0/install.sh
+sudo sh install.sh --key ~/.ssh/id_ed25519.pub
 ```
 
-Keep this process running before pushing. Caddy stores certificates in `$HOIST_DIR/caddy`.
-Allow TCP ports 80 and 443 and point the app's domain at this server. The account needs
-permission to bind those ports (the M7 installer will configure this). `HOIST_TLS=acme`
-is the default and uses Let's Encrypt; set `HOIST_TLS=internal` for an internal CA on
-an air-gapped server or in tests. Clients must trust its root certificate at
-`$HOIST_DIR/caddy/pki/authorities/local/root.crt`.
+The installer prompts for the base domain, ACME email and dashboard password on a
+TTY. For automation set `HOIST_DOMAIN`, `HOIST_ACME_EMAIL`, and
+`HOIST_OWNER_PASSWORD` in the root process environment. It installs Docker from
+its official repository when missing and verifies SHA-256 for hoist and Caddy.
+It creates `/etc/hoist/hoist.env` (0600, owned by hoist), the `hoist` system user
+in the Docker group, `/var/lib/hoist` (0700), and `hoist.service`.
 
-Tests and unprivileged local runs can set `HOIST_HTTP_PORT`, `HOIST_HTTPS_PORT` and
-`HOIST_CADDY_ADMIN_PORT` to distinct high ports. The admin listener is loopback-only
-(default `127.0.0.1:2019`). Set the same admin port in the SSH forced command so hooks
-can reach `serve`. HTTPS URLs printed by the hook use the public default port; append
-`:<HOIST_HTTPS_PORT>` when testing on a high port.
+Add the printed forced-command key line to `/var/lib/hoist/.ssh/authorized_keys`:
+create `.ssh` with mode 0700, the file with mode 0600, and own both as `hoist`.
+The key can push and run public CLI verbs; forwarding, PTY, fetching and cloning
+are disabled. The forced command loads the same environment as systemd.
+`HOIST_OWNER_KEY` also accepts one public key. SSH must already be available.
 
-Run exactly one `hoist serve` per `HOIST_DIR`; a second supervisor fails immediately
-with the current owner's PID. SQLite leases heartbeat every 10 seconds and expire after
-60 seconds without a heartbeat, or immediately when the owner PID is dead. After a
-SIGKILL/crash, the next supervisor reaps the recorded Caddy child only if its pinned
-binary and config path belong to this data directory, then starts one replacement.
+For a non-interactive install without a password, doctor reports the missing
+password and exits 1. Set it using `ssh hoist@server hoist dashboard:set-password`
+with one password line on stdin, then run doctor again.
 
-On startup, hoist fails interrupted `building` releases and removes their images,
-restores missing or stopped live containers, rebuilds routes and removes unreferenced
-app containers. It restarts Caddy with backoff if Caddy exits. Five consecutive exits in under 10 seconds
-each stop `serve` with a non-zero exit, the exit code and the last 50 stderr lines.
-A failed app recovery is logged while healthy apps keep serving. SIGTERM stops both
-processes; app containers stay running for the next `serve`.
+## First push
 
-## Push an app
+The dependency-free Node 20+ client lives in `cli/`. Install it from this checkout
+with `npm install -g ./cli` (npm publication is separate):
 
-The server needs Linux, Docker, Git, tar and OpenSSH, plus the compiled hoist executable
-(`bun install --frozen-lockfile && bun run build`). Use a dedicated server account with Docker
-socket access and a writable data directory. M7 will provide the installer.
-
-Set `HOIST_DIR` (default `/var/lib/hoist`) and `HOIST_DOMAIN` (for example `example.com`) in
-the server's SSH forced command. Add your public key to that account's `authorized_keys`
-with this prefix, substituting absolute paths and your domain:
-
-```text
-command="HOIST_DIR=/absolute/private/hoist-data HOIST_DOMAIN=example.com /absolute/path/to/hoist ssh-dispatch",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 YOUR_PUBLIC_KEY
-```
-
-The generated pre-receive hook hard-codes the executable path at `apps:create` time. Keep
-that path stable; M7 `doctor` will rewrite hooks when the executable moves.
-
-From your computer, create the app through SSH:
-
-```bash
-ssh hoist@server hoist apps:create hello
-ssh hoist@server hoist apps:list --json
-```
-
-In a Git repository with a **Dockerfile at the root**, commit your app and push:
-
-```bash
+```sh
+export HOIST_HOST=server
+hoist apps:create hello
+# In your app repository, with a Dockerfile at its root:
 git remote add hoist hoist@server:hello.git
 git push hoist main
-ssh hoist@server hoist apps:info hello --json
 ```
 
-The push ends with `Live: https://hello.example.com`; opening that URL returns your app.
-Per-app leases in the SQLite `locks` table serialize reserve, build and cutover with
-that app's reconcile. A second holder polls every 200 ms for up to 10 minutes; shutdown
-cancels a waiting lease immediately. Other apps can proceed independently. Reconcile
-writes each app's route under its lease and never replays a full route snapshot. Caddy
-loads a full config only at spawn; a Caddy restart during a push can fail that push's
-route write, which fails the release and removes its candidate. Containers must match
-both app and release labels. Candidates left by a killed hook are removed and their
-`built` release is failed as "interrupted before cutover".
-Closing the terminal mid-push does not cancel the deploy; the release still lands server-side.
+Open `https://hello.example.com`. Without the client, use
+`ssh hoist@server hoist apps:create hello`. `--host <host>` overrides `HOIST_HOST`;
+SSH port and identity options come from `~/.ssh/config`.
 
-The push streams Docker's build records and saves the same bytes to
-`$HOIST_DIR/releases/hello/main/v1/build.log`. The release records the full SHA and image
-`hoist/hello:main-v1-<first-12-SHA-characters>`, with the current encrypted config snapshot. The container uses its single exposed TCP port (UDP exposures are ignored); with no
-exposed TCP port it uses config `PORT`, defaulting to `8080`. Several exposed TCP ports
-require `PORT` in config; otherwise the push fails with an actionable error. Docker assigns a
-random host port published only on `127.0.0.1`. Health requires HTTP **2xx**; redirects
-are not followed and 3xx fails the health check. A failed health check leaves the previous
-release serving and fails the push. A failed push records
-a `failed` release and keeps its log. Branches have separate release numbers; slug collisions
-are refused. Non-main branches remain `built` until M5 adds preview hosts; branch deletes
-do nothing until M5. Immediately before cutover, the pre-receive hook rechecks the stored
-branch tip against the push’s expected old SHA: Git updates the ref only after the hook
-succeeds, so checking against the new SHA here would reject every push.
+A single exposed TCP port is used automatically; with none, set config `PORT`
+(default 8080). Several exposed TCP ports require `PORT`. Health requires HTTP
+2xx at `/`; use `apps:create --health-path /ready` for another path. Push one
+branch update at a time. Closing your terminal does not cancel a server-side push.
 
-`apps:create` accepts `--domain hello.example.com` and `--health-path /ready`. Without
-`--domain`, `HOIST_DOMAIN` must be set. Hoist is push-only: cloning and fetching are refused.
+## Config and rollback
 
-To remove the app, containers, Caddy routes, images, bare repo, release logs and database rows:
-
-```bash
-ssh hoist@server hoist apps:destroy hello --force
+```sh
+hoist config:set hello DATABASE_URL='postgres://example' PORT=8080
+hoist config:list hello              # masked; --reveal explicitly shows values
+hoist restart hello                  # current config takes effect
+hoist releases hello --json
+hoist rollback hello v1              # copies v1's image AND config into a new release
+hoist apps:set hello retention=10
 ```
 
-Destroy also works while `serve` is down: it removes local resources and rows, warns
-that Caddy is unreachable, and lets the next `serve` rebuild routes from the store.
+Config takes effect on the next push or restart. Back up `/var/lib/hoist/secret.key`
+with `hoist.db`; losing this key loses all encrypted config. Retention keeps five
+releases per branch by default and always protects the live release.
 
-Local `apps:destroy` asks for the app name on a TTY. Without a TTY, `--force` is required.
-The data directory and created files are private (directories and executable hooks `0700`,
-ordinary files `0600`; executable checkout files retain owner execute permission).
+## Logs and previews
 
-## Config, rollback and retention
-
-```bash
-ssh hoist@server hoist config:set hello DATABASE_URL='postgres://…' PORT=8080
-ssh hoist@server hoist config:list hello              # masked values
-ssh hoist@server hoist config:list hello --json --reveal
-ssh hoist@server hoist config:unset hello PORT
-ssh hoist@server hoist restart hello
-ssh hoist@server hoist releases hello --json
-ssh hoist@server hoist rollback hello v1
-ssh hoist@server hoist rollback hello                 # previous stopped main release
-ssh hoist@server hoist apps:set hello retention=10
-```
-
-Saving config takes effect on the next push or restart. Keys are uppercase identifiers;
-values may contain `=` and may be empty, with a 64 KiB limit and no NUL. Config values and
-release snapshots are encrypted with AES-256-GCM. The generated 32-byte
-`$HOIST_DIR/secret.key` is private (0600). Back up `secret.key`; losing it loses every
-config value. A missing key is generated only when no current or historical encrypted
-config exists; otherwise restore it from backup. Non-regular key files are refused.
-Only `--reveal` and container startup decrypt values.
-
-Restart creates a new numbered main release from the live image and current config.
-Rollback creates a new release copying the target image and its config snapshot. Both
-use the push cutover path under the app lease and save progress in `build.log`.
-Failed, building, unknown and already-live rollback targets are refused, as are targets
-whose images are gone. A shared image can still be rolled back to after its old logs are pruned.
-
-After successful cutover, retention keeps the newest five live/stopped/built releases
-per app and branch by default (`retention=1..100`). The live release is always protected.
-Prune is best effort after cutover: cleanup errors warn in the new release log and stderr
-without rejecting the push, restart or rollback.
-Older releases get `pruned_at`; their log directories and unreferenced image tags are
-removed. Shared image tags used by retained rollbacks stay. Failed releases are marked pruned
-after image cleanup is attempted, while their log directories stay for M4. Masked config
-listings omit value lengths; `--reveal` includes values and byte lengths.
-
-## Logs
-
-```bash
-ssh hoist@server hoist logs hello
-ssh hoist@server hoist logs hello -n 1
-ssh hoist@server hoist logs hello -f
-ssh hoist@server hoist logs hello --release v2
-ssh hoist@server hoist logs hello --branch feature-x
-```
-
-Runtime output comes from Docker, defaults to the last 100 lines, and accepts `-n`
-from 1 to 10000. Carriage returns are removed unconditionally, so progress-bar
-redraws collapse; all other bytes pass through unchanged. `-f` checks the live
-release every two seconds. Ctrl-C and a release takeover exit 0 (takeover prints
-the new release number). If the app has no live release, it prints a notice and
-exits 1. If Docker closes the stream and nothing changes within two polls, it
-prints `--- container exited ---` and exits 1. Recovery that changes only the
-container ID reattaches automatically and continues following the same release.
-
-`--release vN` reads the complete build and cutover log at
-`$HOIST_DIR/releases/<app>/<branch-slug>/vN/build.log`, including failed pushes.
-Build records are decoded to plain text before saving. The pusher-facing copy escapes
-NUL bytes as `\0` because Git sideband truncates at NUL. Saved files retain the bytes;
-`logs` passes NUL bytes through unchanged. Interrupting saved-file output exits 130
-for SIGINT or 143 for SIGTERM, including when stdout is blocked.
-It cannot be combined with `-f` or `-n`. The branch defaults to the app's configured main branch (`main` by default).
-
-## Preview branches
-
-Push any branch other than the app's main branch to serve it at
-`<branch-slug>.<app.domain>`. For example, `git push hoist feature-x` serves
-`feature-x.hello.example.com` while the main release keeps serving
-`hello.example.com`. Branch names are lowercased, punctuation becomes dashes,
-and duplicate slugs are refused with the existing branch's name. DNS labels
-must fit 63 characters and the complete host must fit 253 characters.
-
-The main branch defaults to `main`; change it with
-`hoist apps:set hello branch=master`. Existing release chains are reclassified
-and their routes updated. Newly converted previews start a fresh TTL window.
-Each preview snapshots the app's current config and keeps the configured number
-of releases in its own branch chain. Logs, rollback and restart default to the
-configured main branch.
-
-```bash
+```sh
+hoist logs hello -f
+hoist logs hello --release v2         # saved build/cutover log, even for failed pushes
+git push hoist feature-x             # https://feature-x.hello.example.com
 hoist previews:list hello --json
-hoist releases hello --branch feature-x --json
-git push hoist :feature-x
-# Or remove the preview and its Git ref with the CLI:
+git push hoist :feature-x            # tears down the preview
 hoist previews:destroy hello feature-x
 ```
 
-Push one branch update at a time; multiple updates are refused before building.
-Deletions may be batched or accompany one update.
-
-Branch-delete teardown runs in post-receive, after Git commits the ref deletion.
-Both teardown commands mark releases stopped, then remove the preview's
-containers, route, images, logs and release rows. The explicit command accepts
-a branch name or its listed slug and also deletes its Git ref in the bare
-repository, so pushing it again recreates the preview. A branch with neither a preview
-row nor any releases is refused: its host may belong to another app. The main branch
-cannot be deleted as a preview.
-
-Previews expire after 7 days without a push. `HOIST_PREVIEW_TTL_DAYS` overrides
-this with an integer from 1 to 365. The sweeper first runs 60 seconds after boot,
-then hourly inside `hoist serve`, holding the same app lease as pushes.
-`HOIST_SWEEP_INTERVAL_MS` overrides both delays for testing (minimum 1000 ms).
+Previews expire after seven idle days (`HOIST_PREVIEW_TTL_DAYS=1..365` in the
+server environment). Change the primary branch with `apps:set hello branch=master`.
 
 ## Dashboard
 
-Set the single owner password, then open `https://hoist.<your-domain>` while `hoist serve`
-is running:
+Open `https://hoist.example.com` and sign in with the owner password. It shows
+apps, releases, previews, config key names and live logs. Restart and rollback
+ask for confirmation; create apps and change config through the CLI.
 
-```bash
-hoist dashboard:set-password   # hidden prompt; accepts one line from stdin too
+Change the password by piping one line into
+`ssh hoist@server hoist dashboard:set-password`. Password changes revoke sessions.
+The dashboard binds loopback port 8700; Caddy provides HTTPS.
+
+## Upgrade and uninstall
+
+Re-run the installer with `HOIST_VERSION=v0.1.0` (or another published tag). It
+replaces the binary and service, preserves the existing environment and app data,
+and runs doctor, which rewrites both generated Git hooks to the current executable.
+Upgrades keep the existing password unless `HOIST_OWNER_PASSWORD` is supplied.
+
+Run `hoist doctor --json` to inspect dependencies, service health, hook repairs
+and orphan containers, images or routes. Orphans are reported for manual cleanup.
+For a container without systemd, `HOIST_DOCTOR_NO_SERVICE=1` downgrades unavailable
+service/admin checks to warnings; other failures still exit 1.
+
+To uninstall, destroy each app with `hoist apps:destroy <name> --force`, then as
+root stop and disable `hoist.service`, remove `/etc/systemd/system/hoist.service`
+and `/usr/local/bin/hoist`, and run `systemctl daemon-reload`. Back up the database
+and key before removing `/etc/hoist`, `/var/lib/hoist`, and the hoist user. Docker
+and its other resources remain installed.
+
+## CLI reference
+
+Generated from the server verb table. `serve` and `ssh-dispatch` are internal
+entry points and cannot be invoked through the SSH control command.
+
+<!-- BEGIN VERBS -->
+```text
+hoist apps:create <name> [--domain <fqdn>] [--health-path </path>]
+hoist apps:list [--json]
+hoist apps:info <name> [--json]
+hoist apps:destroy <name> [--force]
+hoist apps:set <name> retention=N|branch=<name>
+hoist config:set <name> K=V [K=V...]
+hoist config:unset <name> K
+hoist config:list <name> [--reveal] [--json]
+hoist releases <name> [--branch <b>] [--json]
+hoist rollback <name> [vN]
+hoist restart <name>
+hoist logs <name> [-f] [--release vN] [--branch <b>] [-n <lines>]
+hoist previews:list <name> [--json]
+hoist previews:destroy <name> <branch>
+hoist dashboard:set-password
+hoist doctor [--json]
+hoist version
+hoist ssh-dispatch
+hoist serve
 ```
-
-The dashboard shows apps, releases, previews, config key names with a fixed mask, and live
-container logs. Rollback and restart each ask for confirmation, create a new numbered release,
-and show progress. All app creation, config changes and preview management stay on the CLI.
-The log tail ends when another release takes over; reload to reconnect. Oversized log lines
-are marked and truncated at 65,536 characters; the browser keeps the latest 200,000 characters.
-
-`HOIST_DASHBOARD_HOST` overrides the default host. `HOIST_DASHBOARD_PORT` overrides the
-loopback listener's default port 8700; Caddy provides HTTPS. Use a distinct port for each
-hoist data directory on the same machine.
-
-Sessions expire after seven days. Password changes atomically revoke all sessions and reject
-logins still verifying the old password. If no owner password is set, authenticated pages are
-disabled and the login page explains the CLI setup command. Cookies are Secure,
-HttpOnly and SameSite=Strict, forms carry CSRF tokens, and five failed logins block that client
-IP for 15 minutes. The rate limit resets when serve restarts. Config values never enter page
-HTML; log output is rendered as text. Through Caddy, the unauthenticated `/healthz` endpoint
-returns `ok`. Direct loopback requests without `X-Forwarded-Proto: https` receive 403. Caddy must be the only proxy in front
-of hoist: the last comma-separated entry in Caddy's `X-Forwarded-For` header must be a valid
-IP address and keys login throttling.
-
-Dashboard cookies use the `__Host-` prefix, and pages refuse framing. Static assets are
-cached as public/immutable for one year; pages, errors and streams use `no-store`. The dashboard
-host is reserved: apps and previews cannot claim it. Legacy collisions are suppressed on boot
-and reconcile, and cannot be restored by cutover. Oversized forms return a secured HTML 413.
+<!-- END VERBS -->
 
 ## Development
 
-```bash
+```sh
 bun install --frozen-lockfile
 bun run typecheck
 bun run lint
 bun test
 bun run test:e2e
 bun run build
-./dist/hoist version
+bun run pins --check
+mkdir -p .tmp && bun run release:check
 ```
 
-E2e needs Linux, Docker socket access and `/usr/sbin/sshd`. It runs a throwaway SSH server
-as the current account, plus real Docker and Caddy, and verifies teardown. On Omarchy,
-run `echo 'bun run test:e2e' | newgrp docker` if the shell lacks the Docker group. Bare
-`bun test` skips e2e; explicitly enabling e2e fails when prerequisites are unavailable.
+E2e requires Linux, Docker socket access and `/usr/sbin/sshd`. Installer tests run
+only inside a disposable Ubuntu container; they never install onto the host.
+Builds use Bun’s portable Linux runtime (x64 baseline or arm64), so they do not
+inherit distribution-specific ICU libraries. A real public VM's ACME, reboot and
+idle-server timing checks remain manual acceptance before tagging. Release CI cross-compiles both architectures on PRs;
+`v*` tags publish binaries, checksums, installer and changelog notes.

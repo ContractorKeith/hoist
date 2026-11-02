@@ -2,6 +2,8 @@ import {
   chmod,
   lstat,
   mkdtemp,
+  readdir,
+  readFile,
   realpath,
   rm,
   writeFile,
@@ -46,19 +48,47 @@ export async function createRepo(root: string, name: string): Promise<void> {
   privatePath(repo, true, true, root);
   try {
     await git(["init", "--bare", "--initial-branch=main", repo]);
-    for (const hook of ["pre-receive", "post-receive"]) {
-      const path = join(repo, "hooks", hook);
-      await writeFile(
-        path,
-        `#!/bin/sh\nexec ${executableCommand()} git-hook ${hook} ${shellQuote(name)}\n`,
-        { mode: 0o700 },
-      );
-      await chmod(path, 0o700);
-    }
+    await rewriteHooks(root, name);
   } catch (error) {
     await rm(repo, { recursive: true, force: true });
     throw error;
   }
+}
+
+// Keep creation and upgrade repair on exactly the same hook template.
+export async function rewriteHooks(
+  root: string,
+  name: string,
+): Promise<string[]> {
+  appName(name);
+  const changes: string[] = [];
+  for (const hook of ["pre-receive", "post-receive"]) {
+    const path = privatePath(
+      join(root, "repos", `${name}.git`, "hooks", hook),
+      false,
+      false,
+      root,
+    );
+    const expected = `#!/bin/sh\nexec ${executableCommand()} git-hook ${hook} ${shellQuote(name)}\n`;
+    const previous = await readFile(path, "utf8");
+    if (previous !== expected) {
+      await writeFile(path, expected, { mode: 0o700 });
+      changes.push(
+        `${name} ${hook}: replaced ${previous.trim().replace(/\s+/g, " ")} with ${expected.trim().replace(/\s+/g, " ")}`,
+      );
+    }
+    await chmod(path, 0o700);
+  }
+  return changes;
+}
+export async function repairRepoHooks(root: string): Promise<string[]> {
+  const repos = privatePath(join(root, "repos"), true, false, root);
+  const changes: string[] = [];
+  for (const entry of await readdir(repos)) {
+    if (entry.endsWith(".git"))
+      changes.push(...(await rewriteHooks(root, entry.slice(0, -4))));
+  }
+  return changes;
 }
 
 export async function confinedContext(

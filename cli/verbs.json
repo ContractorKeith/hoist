@@ -1,0 +1,21 @@
+[
+  "apps:create <name> [--domain <fqdn>] [--health-path </path>]",
+  "apps:list [--json]",
+  "apps:info <name> [--json]",
+  "apps:destroy <name> [--force]",
+  "apps:set <name> retention=N|branch=<name>",
+  "config:set <name> K=V [K=V...]",
+  "config:unset <name> K",
+  "config:list <name> [--reveal] [--json]",
+  "releases <name> [--branch <b>] [--json]",
+  "rollback <name> [vN]",
+  "restart <name>",
+  "logs <name> [-f] [--release vN] [--branch <b>] [-n <lines>]",
+  "previews:list <name> [--json]",
+  "previews:destroy <name> <branch>",
+  "dashboard:set-password",
+  "doctor [--json]",
+  "version",
+  "ssh-dispatch",
+  "serve"
+]

@@ -1,6 +1,6 @@
 {
   "name": "hoist",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,9 @@
     "lint": "biome check .",
     "test": "bun test",
     "test:e2e": "HOIST_E2E=1 bun test test/e2e",
-    "build": "bun build --compile src/cli/index.ts --outfile dist/hoist"
+    "build": "bun scripts/pins.ts --write --build",
+    "pins": "bun scripts/pins.ts",
+    "release:check": "bun run pins --check && bun build --compile --target=bun-linux-x64-baseline src/cli/index.ts --outfile .tmp/hoist-linux-x64 && bun build --compile --target=bun-linux-arm64 src/cli/index.ts --outfile .tmp/hoist-linux-arm64"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
