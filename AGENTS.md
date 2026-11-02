@@ -14,9 +14,10 @@ M0–M7 merged on main (a487753, 2026-11-02; PRs #9, #14, #19, #22, #20, #21, #2
 #24): toolchain and harness; apps, SSH dispatch, builds and releases; cutover, Caddy
 supervisor, reconcile, SQLite leases; encrypted config, rollback, restart, retention;
 live and per-release logs; previews with teardown and TTL sweeper; dashboard;
-installer, doctor, client CLI and release workflow. v0.1.0 candidate. Release gate in
-progress: `skeptic-review main` on Omarchy, then Keith's manual VM acceptance
-(PLAN §10), then the `v0.1.0` tag.
+installer, doctor, client CLI and release workflow. Skeptic round 3 fixes merged in
+PR #38 (4b2c150); full review, independent attack, unit and Docker gates passed.
+v0.1.0 remains untagged pending Keith's fresh-VM acceptance (PLAN §10), including
+public ACME, systemd upgrade/reboot and idle-VM preview teardown timing.
 
 ## Commands
 
