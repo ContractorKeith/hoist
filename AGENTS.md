@@ -10,10 +10,13 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 
 ## Status
 
-M0–M6 merged on main (04c404e): push, cutover, encrypted config, rollback,
-logs, previews and dashboard. M7 installer, doctor, client and release workflow
-in progress ([draft PR #24](https://github.com/ContractorKeith/hoist/pull/24)).
-The orchestrator sets v0.1.0 after merge.
+M0–M7 merged on main (a487753, 2026-11-02; PRs #9, #14, #19, #22, #20, #21, #23,
+#24): toolchain and harness; apps, SSH dispatch, builds and releases; cutover, Caddy
+supervisor, reconcile, SQLite leases; encrypted config, rollback, restart, retention;
+live and per-release logs; previews with teardown and TTL sweeper; dashboard;
+installer, doctor, client CLI and release workflow. v0.1.0 candidate. Release gate in
+progress: `skeptic-review main` on Omarchy, then Keith's manual VM acceptance
+(PLAN §10), then the `v0.1.0` tag.
 
 ## Commands
 
