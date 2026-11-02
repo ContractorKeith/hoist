@@ -20,6 +20,7 @@ scenario(
   async () => {
     await withSSH(
       async ({
+        appName,
         control,
         source,
         data,
@@ -32,19 +33,21 @@ scenario(
         pushEnv,
         request,
       }) => {
-        expect((await control("apps:create", "hello")).output).toContain(
-          "Created hello",
+        expect((await control("apps:create", appName)).output).toContain(
+          `Created ${appName}`,
         );
         expect(
           JSON.parse((await control("apps:list", "--json")).stdout),
         ).toHaveLength(1);
         expect(
-          (await command([...ssh, remote, "apps:create hello"])).code,
+          (await command([...ssh, remote, `apps:create ${appName}`])).code,
         ).toBe(1);
         const result = await push();
         expect(result.code).toBe(0);
-        expect(result.output).toContain("Live: https://hello.example.test");
-        const app = store.app("hello");
+        expect(result.output).toContain(
+          `Live: https://${appName}.example.test`,
+        );
+        const app = store.app(appName);
         if (!app) throw new Error("Missing app");
         const release = store.releases(app.id)[0];
         if (!release) throw new Error("Missing release");
@@ -59,13 +62,13 @@ scenario(
           ).stdout.trim(),
         );
         const info = JSON.parse(
-          (await control("apps:info", "hello", "--json")).stdout,
+          (await control("apps:info", appName, "--json")).stdout,
         );
         expect(info.health_path).toBe("/");
         expect(info.releases).toHaveLength(1);
         expect(info.releases[0]).toMatchObject({ number: 1, status: "live" });
         expect(release.image).toBe(
-          `hoist/hello:main-v1-${release.git_sha.slice(0, 12)}`,
+          `hoist/${appName}:main-v1-${release.git_sha.slice(0, 12)}`,
         );
         await eventually(async () => {
           const response = await request();
@@ -73,7 +76,7 @@ scenario(
           expect(await response.text()).toBe("hello from hoist\n");
         });
         const log = await readFile(
-          join(data, "releases/hello/main/v1/build.log"),
+          join(data, `releases/${appName}/main/v1/build.log`),
           "utf8",
         );
         expect(log).not.toContain('"stream"');
@@ -93,15 +96,15 @@ scenario(
         expect(remoteLog).toBe(log.replace(/\r/g, "").trimEnd());
         expect(
           await docker.listImages({
-            "hoist.app": "hello",
+            "hoist.app": appName,
             "hoist.sha": release.git_sha,
             "hoist.release": String(release.id),
           }),
         ).toHaveLength(1);
         expect((await stat(join(data, "hoist.db"))).mode & 0o777).toBe(0o600);
-        expect((await stat(join(data, "repos/hello.git"))).mode & 0o777).toBe(
-          0o700,
-        );
+        expect(
+          (await stat(join(data, `repos/${appName}.git`))).mode & 0o777,
+        ).toBe(0o700);
         const tree = (
           await ok(["git", "rev-parse", "HEAD^{tree}"], { cwd: source })
         ).stdout.trim();
@@ -123,13 +126,13 @@ scenario(
         expect(failed?.status).toBe("failed");
         expect(
           await readFile(
-            join(data, "releases/hello/main/v2/build.log"),
+            join(data, `releases/${appName}/main/v2/build.log`),
             "utf8",
           ),
         ).toContain("Missing root Dockerfile");
         expect(
           await docker.listImages({
-            "hoist.app": "hello",
+            "hoist.app": appName,
             "hoist.release": String(failed?.id),
           }),
         ).toEqual([]);
@@ -140,20 +143,20 @@ scenario(
         expect(unknown.code).not.toBe(0);
         expect(unknown.output).toContain("hoist apps:create unknown");
         expect(
-          (await command([...ssh, remote, "apps:destroy hello"])).output,
+          (await command([...ssh, remote, `apps:destroy ${appName}`])).output,
         ).toContain("requires --force");
-        await control("apps:destroy", "hello", "--force");
+        await control("apps:destroy", appName, "--force");
         expect(
           JSON.parse((await control("apps:list", "--json")).stdout),
         ).toEqual([]);
-        for (const path of ["repos/hello.git", "releases/hello"])
+        for (const path of [`repos/${appName}.git`, `releases/${appName}`])
           expect(await stat(join(data, path)).catch(() => null)).toBeNull();
         expect(store.apps()).toEqual([]);
         expect(store.releases(app.id)).toEqual([]);
-        expect(await docker.listContainers({ "hoist.app": "hello" })).toEqual(
+        expect(await docker.listContainers({ "hoist.app": appName })).toEqual(
           [],
         );
-        expect(await docker.listImages({ "hoist.app": "hello" })).toEqual([]);
+        expect(await docker.listImages({ "hoist.app": appName })).toEqual([]);
         expect(await readdir(join(data, "tmp"))).toEqual([]);
       },
     );

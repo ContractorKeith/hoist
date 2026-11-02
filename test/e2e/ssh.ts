@@ -77,8 +77,10 @@ async function startSSH(executable?: string) {
   const root = await mkdtemp(join(tmpdir(), "hoist-ssh-"));
   const data = join(root, "data"),
     source = join(root, "source");
-  const lease = await reservePorts(4);
-  const [sshPort, admin, http, https] = lease.ports as [
+  const appName = `hello-${crypto.randomUUID().replaceAll("-", "").slice(0, 6)}`;
+  const lease = await reservePorts(5);
+  const [sshPort, admin, http, https, dashboard] = lease.ports as [
+    number,
     number,
     number,
     number,
@@ -89,6 +91,7 @@ async function startSSH(executable?: string) {
     HOIST_DIR: data,
     HOIST_DOMAIN: "example.test",
     HOIST_TLS: "internal",
+    HOIST_DASHBOARD_PORT: String(dashboard),
     HOIST_CADDY_ADMIN_PORT: String(admin),
     HOIST_HTTP_PORT: String(http),
     HOIST_HTTPS_PORT: String(https),
@@ -97,7 +100,7 @@ async function startSSH(executable?: string) {
     server: ReturnType<typeof Bun.spawn> | undefined;
   let logs = "",
     serverLogs: Promise<void> | undefined;
-  const appNames = new Set(["hello"]);
+  const appNames = new Set([appName]);
   let leaseReleased = false;
   let store: SqliteStore | undefined;
   const stopServe = async () => {
@@ -280,7 +283,13 @@ async function startSSH(executable?: string) {
     };
     await commit();
     await ok(
-      ["git", "remote", "add", "hoist", `ssh://${remote}:${sshPort}/hello.git`],
+      [
+        "git",
+        "remote",
+        "add",
+        "hoist",
+        `ssh://${remote}:${sshPort}/${appName}.git`,
+      ],
       { cwd: source },
     );
     const pushEnv = {
@@ -291,7 +300,7 @@ async function startSSH(executable?: string) {
     };
     const push = () =>
       command(["git", "push", "hoist", "main"], { cwd: source, env: pushEnv });
-    const request = async (host = "hello.example.test", path = "/") => {
+    const request = async (host = `${appName}.example.test`, path = "/") => {
       const ca = await readFile(
         join(data, "caddy/pki/authorities/local/root.crt"),
         "utf8",
@@ -304,6 +313,7 @@ async function startSSH(executable?: string) {
     };
     store = new SqliteStore(data);
     return {
+      appName,
       root,
       data,
       source,

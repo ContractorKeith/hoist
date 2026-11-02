@@ -123,7 +123,8 @@ releases    id, app_id, branch, number, git_sha, image, config_json (encrypted),
 config      app_id, key, value (encrypted)       -- current config; snapshotted into releases
 previews    app_id, branch, slug, last_push_at    -- current release is the newest live release
                                                    for (app_id, branch)
-sessions    token_hash, expires_at
+sessions    token_hash, expires_at, password_version
+settings    key (primary key), value           -- owner_password: Argon2id hash; password_version
 locks       name (primary key), owner_pid, heartbeat_at, acquired_at, child_pid (nullable)
 ```
 
@@ -136,6 +137,15 @@ than `pruned_at`, since retained releases may share an image tag.
 
 `number` is per `(app_id, branch)`; image tags are `hoist/<app>:<branch-slug>-v<number>-<sha12>`, unique to each release. Main-branch releases are `v1, v2, ...`; a preview has its own
 `v1, v2, ...`. Rollback inserts a new row copying `image` and `config_json` from the target.
+
+Dashboard tokens are random 32-byte values, stored as SHA-256 hashes with a seven-day expiry.
+The per-session CSRF token is derived from the cookie token; login uses a separate cookie
+challenge. Password replacement atomically updates the hash and password version and deletes
+all sessions.
+Session creation rechecks the verified credentials inside an immediate transaction; validation
+rejects missing owner passwords, version mismatches and malformed/expired timestamps (deleting
+invalid rows). Migration 7 initializes the version and revokes unversioned sessions. Static
+assets and `/login` and `/healthz` are public; every dashboard page and stream requires a valid session.
 
 ## 7. CLI contract
 
@@ -150,6 +160,7 @@ hoist rollback <name> [vN]
 hoist restart <name>
 hoist logs <name> [-f] [--release vN] [--branch <b>] [-n <lines>]
 hoist previews:list <name> | previews:destroy <name> <branch>
+hoist dashboard:set-password  # owner password from stdin or hidden prompt
 hoist doctor | version
 hoist ssh-dispatch            # internal: authorized_keys forced command
 hoist serve                   # internal: systemd entry
@@ -157,6 +168,9 @@ hoist serve                   # internal: systemd entry
 
 Client CLI: `hoist` with `HOIST_HOST` or `--host` runs `ssh hoist@<host> hoist <args>`; nothing
 else. Git remote: `hoist@<host>:<app>`.
+
+`hoist dashboard:set-password` reads one password line from stdin or a hidden TTY prompt,
+hashes it with Argon2id, and saves it in settings.
 
 ## 8. Milestones
 

@@ -216,6 +216,40 @@ this with an integer from 1 to 365. The sweeper first runs 60 seconds after boot
 then hourly inside `hoist serve`, holding the same app lease as pushes.
 `HOIST_SWEEP_INTERVAL_MS` overrides both delays for testing (minimum 1000 ms).
 
+## Dashboard
+
+Set the single owner password, then open `https://hoist.<your-domain>` while `hoist serve`
+is running:
+
+```bash
+hoist dashboard:set-password   # hidden prompt; accepts one line from stdin too
+```
+
+The dashboard shows apps, releases, previews, config key names with a fixed mask, and live
+container logs. Rollback and restart each ask for confirmation, create a new numbered release,
+and show progress. All app creation, config changes and preview management stay on the CLI.
+The log tail ends when another release takes over; reload to reconnect. Oversized log lines
+are marked and truncated at 65,536 characters; the browser keeps the latest 200,000 characters.
+
+`HOIST_DASHBOARD_HOST` overrides the default host. `HOIST_DASHBOARD_PORT` overrides the
+loopback listener's default port 8700; Caddy provides HTTPS. Use a distinct port for each
+hoist data directory on the same machine.
+
+Sessions expire after seven days. Password changes atomically revoke all sessions and reject
+logins still verifying the old password. If no owner password is set, authenticated pages are
+disabled and the login page explains the CLI setup command. Cookies are Secure,
+HttpOnly and SameSite=Strict, forms carry CSRF tokens, and five failed logins block that client
+IP for 15 minutes. The rate limit resets when serve restarts. Config values never enter page
+HTML; log output is rendered as text. Through Caddy, the unauthenticated `/healthz` endpoint
+returns `ok`. Direct loopback requests without `X-Forwarded-Proto: https` receive 403. Caddy must be the only proxy in front
+of hoist: the last comma-separated entry in Caddy's `X-Forwarded-For` header must be a valid
+IP address and keys login throttling.
+
+Dashboard cookies use the `__Host-` prefix, and pages refuse framing. Static assets are
+cached as public/immutable for one year; pages, errors and streams use `no-store`. The dashboard
+host is reserved: apps and previews cannot claim it. Legacy collisions are suppressed on boot
+and reconcile, and cannot be restored by cutover. Oversized forms return a secured HTML 413.
+
 ## Development
 
 ```bash

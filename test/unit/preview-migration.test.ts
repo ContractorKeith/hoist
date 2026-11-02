@@ -10,8 +10,8 @@ test("pre-M5 release chains are backfilled as fresh, slugified previews during m
   const root = await mkdtemp(join(tmpdir(), "preview-migration-"));
   try {
     const db = new Database(join(root, "hoist.db"));
-    for (const sql of migrations.slice(0, -1)) db.exec(sql);
-    db.exec(`PRAGMA user_version = ${migrations.length - 1}`);
+    for (const sql of migrations.slice(0, 4)) db.exec(sql);
+    db.exec("PRAGMA user_version = 4");
     db.run(
       "INSERT INTO apps(id, name, domain) VALUES (1, 'blog', 'blog.test')",
     );

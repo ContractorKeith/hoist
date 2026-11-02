@@ -9,12 +9,13 @@ scenario(
   "unwritable old logs warn without rejecting a completed push, restart or rollback",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
-      await h.control("apps:set", "hello", "retention=1");
+      const { appName } = h;
+      await h.control("apps:create", appName);
+      await h.control("apps:set", appName, "retention=1");
       expect((await h.push()).code).toBe(0);
-      const app = h.store.app("hello");
+      const app = h.store.app(appName);
       if (!app) throw new Error("missing app");
-      const blocked = join(h.data, "releases/hello/main/v1");
+      const blocked = join(h.data, `releases/${appName}/main/v1`);
       await chmod(blocked, 0o500);
       try {
         await writeFile(join(h.source, "index.html"), "v2 accepted\n");
@@ -31,7 +32,7 @@ scenario(
             await ok([
               "git",
               "--git-dir",
-              join(h.data, "repos/hello.git"),
+              join(h.data, `repos/${appName}.git`),
               "rev-parse",
               "main",
             ])
@@ -42,25 +43,25 @@ scenario(
         });
         expect(
           await readFile(
-            join(h.data, "releases/hello/main/v2/build.log"),
+            join(h.data, `releases/${appName}/main/v2/build.log`),
             "utf8",
           ),
         ).toContain("prune: could not remove ");
-        const restarted = await h.control("restart", "hello");
+        const restarted = await h.control("restart", appName);
         expect(restarted.output).toContain("prune: could not remove ");
         expect(rows()[2]?.status).toBe("live");
         expect(
           await readFile(
-            join(h.data, "releases/hello/main/v3/build.log"),
+            join(h.data, `releases/${appName}/main/v3/build.log`),
             "utf8",
           ),
         ).toContain("prune: could not remove ");
-        const rolled = await h.control("rollback", "hello", "v2");
+        const rolled = await h.control("rollback", appName, "v2");
         expect(rolled.output).toContain("prune: could not remove ");
         expect(rows()[3]?.status).toBe("live");
         expect(
           await readFile(
-            join(h.data, "releases/hello/main/v4/build.log"),
+            join(h.data, `releases/${appName}/main/v4/build.log`),
             "utf8",
           ),
         ).toContain("prune: could not remove ");

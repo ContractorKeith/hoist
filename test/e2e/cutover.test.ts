@@ -10,11 +10,12 @@ scenario(
   "serves over HTTPS, zero-downtime second push, failed health check keeps old, restart reconciles and destroy cleans everything",
   async () => {
     await withSSH(async (h) => {
+      const { appName } = h;
       const { store, docker, data, source, control, push, commit, request } = h;
-      await control("apps:create", "hello");
+      await control("apps:create", appName);
       const first = await push();
       expect(first.code).toBe(0);
-      const app = store.app("hello");
+      const app = store.app(appName);
       if (!app) throw new Error("Missing app");
       const rows = () => store.releases(app.id);
       const v1 = rows()[0];
@@ -108,13 +109,13 @@ scenario(
       );
       expect(rows()[1]?.status).toBe("live");
       expect(rows()[2]?.status).toBe("failed");
-      const failedLog = await control("logs", "hello", "--release", "v3");
+      const failedLog = await control("logs", appName, "--release", "v3");
       expect(failedLog.stdout).toContain(
         "Health check GET / failed after 30 s: HTTP 500",
       );
       expect(await (await request()).text()).toBe("second release\n");
       expect(
-        await docker.listContainers({ "hoist.app": "hello" }),
+        await docker.listContainers({ "hoist.app": appName }),
       ).toHaveLength(1);
       await h.stopServe();
       const stale = reserveRelease(store, app, "main", "c".repeat(40));
@@ -173,26 +174,27 @@ scenario(
       expect(redirect.status).toBe(308);
       await redirect.body?.cancel();
       console.log(
-        `README walkthrough: HOIST_DIR=<private> HOIST_TLS=internal HOIST_HTTP_PORT=${h.http} HOIST_HTTPS_PORT=${h.https} HOIST_CADDY_ADMIN_PORT=${h.admin} hoist serve; ssh … hoist apps:create hello; git remote add hoist ssh://…/hello.git; git push hoist main; HTTPS Host: hello.example.test, tls.ca=root.crt -> 200, second release`,
+        `README walkthrough: HOIST_DIR=<private> HOIST_TLS=internal HOIST_HTTP_PORT=${h.http} HOIST_HTTPS_PORT=${h.https} HOIST_CADDY_ADMIN_PORT=${h.admin} hoist serve; ssh … hoist apps:create ${appName}; git remote add hoist ssh://…/${appName}.git; git push hoist main; HTTPS Host: ${appName}.example.test, tls.ca=root.crt -> 200, second release`,
       );
       console.log(
         `Internal CA loaded: ${(await readFile(join(data, "caddy/pki/authorities/local/root.crt"), "utf8")).startsWith("-----BEGIN CERTIFICATE-----")}`,
       );
-      await control("apps:destroy", "hello", "--force");
+      await control("apps:destroy", appName, "--force");
       expect(store.apps()).toEqual([]);
       expect(rows()).toEqual([]);
       expect(await docker.listContainers({ "hoist.app": app.name })).toEqual(
         [],
       );
       expect(await docker.listImages({ "hoist.app": app.name })).toEqual([]);
-      for (const path of ["repos/hello.git", "releases/hello"])
+      for (const path of [`repos/${appName}.git`, `releases/${appName}`])
         expect(await stat(join(data, path)).catch(() => null)).toBeNull();
       const routes = await (
         await fetch(
           `http://127.0.0.1:${h.admin}/config/apps/http/servers/hoist/routes`,
         )
       ).json();
-      expect(routes).toEqual([]);
+      expect(JSON.stringify(routes)).toContain("hoist.example.test");
+      expect(routes).toHaveLength(1);
     });
   },
   240000,
@@ -202,7 +204,8 @@ scenario(
   "a disconnected pusher still completes cutover server-side",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       const dockerfile = await readFile(join(h.source, "Dockerfile"), "utf8");
       await writeFile(
         join(h.source, "Dockerfile"),
@@ -219,19 +222,19 @@ scenario(
         stderr: "ignore",
       });
       await eventually(async () => {
-        const app = h.store.app("hello");
+        const app = h.store.app(appName);
         expect(app && h.store.releases(app.id)[0]?.status).toBe("building");
       });
       client.kill("SIGHUP");
       await client.exited;
       await eventually(async () => {
-        const app = h.store.app("hello");
+        const app = h.store.app(appName);
         expect(app && h.store.releases(app.id)[0]?.status).toBe("live");
       }, 30000);
       await eventually(async () => {
         expect(await (await h.request()).text()).toBe("hello from hoist\n");
       });
-      await h.control("apps:destroy", "hello", "--force");
+      await h.control("apps:destroy", appName, "--force");
     });
   },
   90000,
@@ -241,7 +244,8 @@ scenario(
   "two concurrent main pushes serialize cutover and leave exactly one live container",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       expect((await h.push()).code).toBe(0);
       const clones = [join(h.root, "clone-one"), join(h.root, "clone-two")];
       const remote = (
@@ -286,13 +290,13 @@ scenario(
         );
       }
       expect(results.some((result) => result.code === 0)).toBe(true);
-      const app = h.store.app("hello");
+      const app = h.store.app(appName);
       if (!app) throw new Error("Missing app");
       const releases = h.store.releases(app.id),
         live = releases.filter((row) => row.status === "live");
       expect(live).toHaveLength(1);
       const containers = await h.docker.listContainers({
-        "hoist.app": "hello",
+        "hoist.app": appName,
       });
       expect(containers).toHaveLength(1);
       expect(containers[0]?.id).toBe(live[0]?.container_id ?? undefined);
@@ -301,7 +305,7 @@ scenario(
           (row) => row.status === "built" || row.status === "building",
         ),
       ).toEqual([]);
-      await h.control("apps:destroy", "hello", "--force");
+      await h.control("apps:destroy", appName, "--force");
     });
   },
   180000,
@@ -311,7 +315,8 @@ scenario(
   "a health path returning HTTP 302 fails the push",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello", "--health-path", "/");
+      const { appName } = h;
+      await h.control("apps:create", appName, "--health-path", "/");
       await writeFile(
         join(h.source, "Dockerfile"),
         'FROM busybox:1.37.0\nEXPOSE 8080\nCMD ["sh", "-c", "while true; do printf \'HTTP/1.1 302 Found\\r\\nLocation: /ready\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n\' | nc -l -p 8080; done"]\n',
@@ -321,14 +326,14 @@ scenario(
       expect(result.code).not.toBe(0);
       expect(result.output).toContain("HTTP 302");
       expect(result.output).toContain("expected HTTP 2xx");
-      const app = h.store.app("hello");
+      const app = h.store.app(appName);
       if (!app) throw new Error("Missing app");
       expect(h.store.releases(app.id)[0]?.status).toBe("failed");
-      expect(await h.docker.listContainers({ "hoist.app": "hello" })).toEqual(
+      expect(await h.docker.listContainers({ "hoist.app": appName })).toEqual(
         [],
       );
       await h.stopServe();
-      const destroyed = await h.control("apps:destroy", "hello", "--force");
+      const destroyed = await h.control("apps:destroy", appName, "--force");
       expect(destroyed.output).toContain(
         "Caddy not reachable; routes are rebuilt from the store when hoist serve starts",
       );
@@ -358,6 +363,7 @@ scenario(
             ...h.env,
             HOIST_DIR: join(h.root, "crash-data"),
             HOIST_HTTPS_PORT: String(occupied.port),
+            HOIST_DASHBOARD_PORT: String(await highPort()),
             HOIST_CADDY_ADMIN_PORT: String(await highPort()),
             HOIST_HTTP_PORT: String(await highPort()),
           },

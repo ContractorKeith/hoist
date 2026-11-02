@@ -8,17 +8,18 @@ scenario(
   "unowned preview deletion preserves another app; multi-update pushes leave production unchanged; explicit destroy permits re-push",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       expect((await h.push()).code).toBe(0);
       await h.control(
         "apps:create",
-        "b",
+        `b-${appName}`,
         "--domain",
-        "blocked.hello.example.test",
+        `blocked.${appName}.example.test`,
       );
       const runGit = (...args: string[]) =>
         command(["git", ...args], { cwd: h.source, env: h.pushEnv });
-      const app = h.store.app("hello");
+      const app = h.store.app(appName);
       if (!app) throw new Error("missing app");
       // Use the already-configured remote's URL so this also exercises forced SSH dispatch.
       const helloRemote = (
@@ -26,19 +27,19 @@ scenario(
       ).stdout.trim();
       const bPush = await runGit(
         "push",
-        helloRemote.replace(/hello\.git$/, "b.git"),
+        helloRemote.replace(`${appName}.git`, `b-${appName}.git`),
         "HEAD:refs/heads/main",
       );
       expect(bPush.code).toBe(0);
       const checkB = async () => {
         expect(
-          await (await h.request("blocked.hello.example.test")).text(),
+          await (await h.request(`blocked.${appName}.example.test`)).text(),
         ).toBe("hello from hoist\n");
       };
       await eventually(checkB);
       // Install a Git-only branch without ever reserving a Hoist preview.
       const sha = (await runGit("rev-parse", "HEAD")).stdout.trim();
-      const repo = join(h.data, "repos/hello.git");
+      const repo = join(h.data, `repos/${appName}.git`);
       expect(
         (
           await command([
@@ -56,11 +57,11 @@ scenario(
         h.remote,
         "hoist",
         "previews:destroy",
-        "hello",
+        appName,
         "blocked",
       ]);
       expect(refused.code).not.toBe(0);
-      expect(refused.output).toContain("no preview blocked for hello");
+      expect(refused.output).toContain(`no preview blocked for ${appName}`);
       await checkB();
       const deletion = await runGit("push", "hoist", ":blocked");
       expect(deletion.code).toBe(0);
@@ -110,7 +111,7 @@ scenario(
       expect(
         (await runGit("push", "hoist", "HEAD:refs/heads/feature")).code,
       ).toBe(0);
-      const destroyed = await h.control("previews:destroy", "hello", "feature");
+      const destroyed = await h.control("previews:destroy", appName, "feature");
       expect(destroyed.stdout).toContain(
         "deleted refs/heads/feature; push again to recreate it",
       );
@@ -135,7 +136,7 @@ scenario(
       expect(recreated.output).not.toContain("Everything up-to-date");
       await eventually(async () =>
         expect(
-          await (await h.request("feature.hello.example.test")).text(),
+          await (await h.request(`feature.${appName}.example.test`)).text(),
         ).toBe("must not reach production\n"),
       );
       expect(h.store.previews(app.id).map((p) => p.branch)).toEqual([

@@ -9,14 +9,15 @@ scenario(
   "failed build log readable after push",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       expect((await h.push()).code).toBe(0);
-      const runtime = await h.control("logs", "hello");
+      const runtime = await h.control("logs", appName);
       expect(runtime.stdout).toContain("httpd listening on 8080");
       expect(runtime.stdout).not.toContain("\r");
-      const one = await h.control("logs", "hello", "-n", "1");
+      const one = await h.control("logs", appName, "-n", "1");
       expect(one.stdout.trim().split("\n")).toHaveLength(1);
-      const saved = await h.control("logs", "hello", "--release", "v1");
+      const saved = await h.control("logs", appName, "--release", "v1");
       for (const text of [
         "Starting new container",
         "Health check GET /",
@@ -32,7 +33,7 @@ scenario(
       );
       await h.commit();
       expect((await h.push()).code).not.toBe(0);
-      const failed = await h.control("logs", "hello", "--release", "v2");
+      const failed = await h.control("logs", appName, "--release", "v2");
       expect(failed.stdout).toContain("hoist_missing_command");
       expect(failed.stdout).toContain("Docker build:");
       expect(
@@ -43,13 +44,13 @@ scenario(
         h.remote,
         "hoist",
         "logs",
-        "hello",
+        appName,
         "--release",
         "v999",
       ]);
       expect(missing.code).toBe(1);
       expect(missing.stderr).toContain("release v999");
-      const app = h.store.app("hello");
+      const app = h.store.app(appName);
       expect(app && h.store.releases(app.id)[0]?.status).toBe("live");
     });
   },
@@ -60,7 +61,8 @@ scenario(
   "follow ends on cutover",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       // CGI writes a unique request marker to the container TTY; health checks stay quiet.
       await writeFile(
         join(h.source, "Dockerfile"),
@@ -72,14 +74,14 @@ scenario(
       );
       await h.commit();
       expect((await h.push()).code).toBe(0);
-      expect((await h.control("logs", "hello", "-n", "1")).stdout).toBe(
+      expect((await h.control("logs", appName, "-n", "1")).stdout).toBe(
         "ready\n",
       );
-      expect((await h.control("logs", "hello", "-n", "2")).stdout).toBe(
+      expect((await h.control("logs", appName, "-n", "2")).stdout).toBe(
         "second\nready\n",
       );
       const child = Bun.spawn(
-        [...h.ssh, h.remote, "hoist", "logs", "hello", "-f"],
+        [...h.ssh, h.remote, "hoist", "logs", appName, "-f"],
         { stdout: "pipe", stderr: "pipe" },
       );
       let output = "";
@@ -94,7 +96,7 @@ scenario(
         });
         const start = output.length;
         const requestedAt = Date.now();
-        const app = h.store.app("hello");
+        const app = h.store.app(appName);
         const id = app && h.store.releases(app.id)[0]?.container_id;
         if (!id) throw new Error("Missing live container");
         const info = await h.docker.inspectContainer(id);
@@ -113,14 +115,14 @@ scenario(
         expect(output).toContain("--- release v2 took over ---");
         expect(output).not.toContain("\r");
         expect(
-          (await h.control("logs", "hello", "--release", "v2")).stdout,
+          (await h.control("logs", appName, "--release", "v2")).stdout,
         ).toContain("Stopping previous container");
         const interrupted = Bun.spawn(
           [
             process.execPath,
             join(import.meta.dir, "../../src/cli/index.ts"),
             "logs",
-            "hello",
+            appName,
             "-f",
           ],
           { env: h.env, stdout: "pipe", stderr: "pipe" },
@@ -140,9 +142,9 @@ scenario(
           reader.releaseLock();
           await stderr;
         }
-        const rollback = await h.control("rollback", "hello", "v1");
+        const rollback = await h.control("rollback", appName, "v1");
         expect(rollback.stdout).toContain("Live: https://");
-        const saved = await h.control("logs", "hello", "--release", "v3");
+        const saved = await h.control("logs", appName, "--release", "v3");
         for (const step of [
           "Starting new container",
           "Health check passed",

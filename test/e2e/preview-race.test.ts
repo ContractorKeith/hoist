@@ -10,14 +10,15 @@ scenario(
   "an older delayed deletion cannot tear down recreation before its Git ref commits",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       const pushArgs = ["git", "push", "hoist", "HEAD:refs/heads/feature"];
       expect(
         (await command(pushArgs, { cwd: h.source, env: h.pushEnv })).code,
       ).toBe(0);
-      const app = h.store.app("hello");
+      const app = h.store.app(appName);
       if (!app) throw new Error("missing app");
-      const repo = join(h.data, "repos/hello.git");
+      const repo = join(h.data, `repos/${appName}.git`);
       const prePath = join(repo, "hooks/pre-receive"),
         postPath = join(repo, "hooks/post-receive");
       const pre = await readFile(prePath, "utf8"),
@@ -110,7 +111,7 @@ scenario(
         expect((await recreation.done).code).toBe(0);
         await eventually(async () =>
           expect(
-            await (await h.request("feature.hello.example.test")).text(),
+            await (await h.request(`feature.${appName}.example.test`)).text(),
           ).toBe("hello from hoist\n"),
         );
       } finally {

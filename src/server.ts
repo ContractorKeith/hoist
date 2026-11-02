@@ -6,19 +6,19 @@ import { Docker } from "./adapters/docker";
 import { checkHealth } from "./adapters/health";
 import { stopOrphanCaddy } from "./adapters/orphan-caddy";
 import { stopChild } from "./adapters/process";
-import { hostName, port } from "./adapters/validation";
+import { port } from "./adapters/validation";
+import { bootRoutes } from "./core/boot-routes";
 import {
   type CaddySettings,
   caddyConfig,
   newestRoutes,
-  type ReleaseRoute,
 } from "./core/caddy-config";
-import { ownsContainer } from "./core/cutover";
-import { previewTTL, releaseHost, sweepPreviews } from "./core/previews";
+import { previewTTL, sweepPreviews } from "./core/previews";
 import { reconcile } from "./core/reconcile";
 import { dataRoot, privatePath } from "./data";
 import { finishSupervisor, scheduleSweep } from "./preview-timer";
 import { SqliteStore } from "./store/sqlite";
+import { dashboardRoute, startDashboard } from "./web/server";
 
 export function caddySettings(root: string): CaddySettings {
   const tls = process.env.HOIST_TLS ?? "acme";
@@ -51,12 +51,20 @@ export async function serve(): Promise<void> {
   const startedAt = new Date().toISOString();
   const root = dataRoot(),
     settings = caddySettings(root);
+  const dashboard = dashboardRoute();
+  if (
+    [settings.adminPort, settings.httpPort, settings.httpsPort].includes(
+      dashboard.port,
+    )
+  )
+    throw new Error("Dashboard and Caddy ports must be distinct");
   const store = new SqliteStore(root),
     docker = new Docker(),
     caddy = new Caddy(settings.adminPort);
   const locks = new SqliteAppLocks(store);
   const shutdown = new AbortController();
   let lease: Awaited<ReturnType<SqliteAppLocks["acquire"]>> | undefined;
+  let web: ReturnType<typeof startDashboard> | undefined;
   let stopping = false;
   let stoppingChild: Promise<void> | undefined;
   let child: ReturnType<typeof Bun.spawn> | undefined;
@@ -89,6 +97,7 @@ export async function serve(): Promise<void> {
     });
     shutdown.signal.throwIfAborted();
     await docker.ping();
+    web = startDashboard(root, store, docker, { signal: shutdown.signal });
     const binary = await ensureCaddy();
     const configPath = privatePath(
       join(root, "caddy.json"),
@@ -104,36 +113,10 @@ export async function serve(): Promise<void> {
     let fastExits = 0;
     while (!stopping) {
       // Rebuild from the store on each restart; never replay a stale file after cutover.
-      const routes: ReleaseRoute[] = [];
-      for (const app of store.apps()) {
-        try {
-          hostName(app.domain);
-          for (const release of store
-            .releases(app.id)
-            .filter((row) => row.status === "live")) {
-            try {
-              const info = release.container_id
-                ? await docker.inspectContainer(release.container_id)
-                : null;
-              if (info?.running && ownsContainer(info, app, release))
-                routes.push({
-                  host: releaseHost(app, release.branch),
-                  upstream: `127.0.0.1:${info.port}`,
-                  releaseId: release.id,
-                });
-            } catch (error) {
-              console.error(
-                `${app.name} release ${release.id}: ${String(error)}`,
-              );
-            }
-          }
-        } catch (error) {
-          console.error(`${app.name}: ${String(error)}`);
-        }
-      }
+      const routes = await bootRoutes(store, docker, dashboard, console.error);
       await Bun.write(
         configPath,
-        JSON.stringify(caddyConfig(settings, newestRoutes(routes))),
+        JSON.stringify(caddyConfig(settings, newestRoutes(routes), dashboard)),
       );
       const childStarted = Date.now();
       child = Bun.spawn([binary, "run", "--config", configPath], {
@@ -191,6 +174,7 @@ export async function serve(): Promise<void> {
             startedAt,
             console.error,
             shutdown.signal,
+            dashboard,
           );
           boot = false;
           sweeper.start();
@@ -239,6 +223,7 @@ export async function serve(): Promise<void> {
         if (child) lease?.setChild(null);
       },
     );
+    await web?.stop();
     lease?.release();
     process.off("SIGTERM", stop);
     process.off("SIGINT", stop);

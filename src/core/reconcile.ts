@@ -5,6 +5,7 @@ import type {
 } from "../adapters/interfaces";
 import type { Store } from "../store/interface";
 import { removeImages } from "./build";
+import { dashboardRouteGuard, type ReleaseRoute } from "./caddy-config";
 import { type HealthCheck, ownsContainer, recoverLive } from "./cutover";
 import { releaseHost } from "./previews";
 
@@ -17,8 +18,10 @@ export async function reconcile(
   startedAt = new Date().toISOString(),
   report: (message: string) => void = console.error,
   signal?: AbortSignal,
+  dashboard?: ReleaseRoute,
 ): Promise<string[]> {
   const errors: string[] = [];
+  const allowed = dashboardRouteGuard(dashboard, report);
   const record = (context: string, error: unknown) => {
     const message = `${context}: ${String(error)}`;
     errors.push(message);
@@ -47,6 +50,8 @@ export async function reconcile(
                 });
               }
               if (release.status !== "live") continue;
+              if (!allowed(app.name, releaseHost(app, release.branch)))
+                continue;
               const container = release.container_id
                 ? await docker.inspectContainer(release.container_id)
                 : null;
@@ -75,6 +80,8 @@ export async function reconcile(
             .filter((row) => row.status === "live")
             .sort((a, b) => b.id - a.id)) {
             try {
+              if (!allowed(app.name, releaseHost(app, release.branch)))
+                continue;
               const container = release.container_id
                 ? await docker.inspectContainer(release.container_id)
                 : null;
@@ -98,6 +105,7 @@ export async function reconcile(
             ...routes.keys(),
           ]);
           for (const host of hosts) {
+            if (!allowed(app.name, host)) continue;
             try {
               const upstream = routes.get(host);
               if (upstream) await caddy.upsertRoute(host, upstream);
@@ -167,6 +175,13 @@ export async function reconcile(
     }
   } catch (error) {
     record("orphan sweep", error);
+  }
+  if (dashboard && !signal?.aborted) {
+    try {
+      await caddy.upsertRoute(dashboard.host, dashboard.upstream);
+    } catch (error) {
+      record("dashboard route", error);
+    }
   }
   return errors;
 }

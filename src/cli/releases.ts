@@ -18,6 +18,7 @@ export async function releasesCommand(
   root: string,
   store: Store,
   args: string[],
+  signal?: AbortSignal,
 ): Promise<void> {
   const [verb, name, ...rest] = args;
   const app = knownApp(store, appName(name ?? ""));
@@ -65,58 +66,62 @@ export async function releasesCommand(
     throw new Error(
       `Usage: hoist ${verb} <app>${verb === "rollback" ? " [vN]" : ""}`,
     );
-  await new SqliteAppLocks(store).withLock(app.name, async () => {
-    const app = knownApp(store, name ?? "");
-    const docker = new Docker();
-    const release = await copyRelease(
-      store,
-      docker,
-      app,
-      verb === "restart",
-      rest[0],
-    );
-    const path = privatePath(
-      join(
+  await new SqliteAppLocks(store).withLock(
+    app.name,
+    async () => {
+      const app = knownApp(store, name ?? "");
+      const docker = new Docker();
+      const release = await copyRelease(
+        store,
+        docker,
+        app,
+        verb === "restart",
+        rest[0],
+      );
+      const path = privatePath(
+        join(
+          root,
+          "releases",
+          app.name,
+          branchSlug(release.branch),
+          `v${release.number}`,
+          "build.log",
+        ),
+        false,
+        false,
         root,
-        "releases",
-        app.name,
-        branchSlug(release.branch),
-        `v${release.number}`,
-        "build.log",
-      ),
-      false,
-      false,
-      root,
-    );
-    const file = await open(path, "a", 0o600);
-    try {
-      await cutover(
-        store,
-        docker,
-        new Caddy(caddySettings(root).adminPort),
-        app,
-        release,
-        null,
-        async () => null,
-        checkHealth,
-        async (line) => {
-          await file.writeFile(`${line}\n`);
-          console.log(line);
-        },
       );
-      await prune(
-        store,
-        docker,
-        app,
-        (row) =>
-          removeReleaseLogs(root, app.name, row.branch, row.number, store),
-        async (message) => {
-          await file.writeFile(`${message}\n`);
-        },
-        release.branch,
-      );
-    } finally {
-      await file.close();
-    }
-  });
+      const file = await open(path, "a", 0o600);
+      try {
+        await cutover(
+          store,
+          docker,
+          new Caddy(caddySettings(root).adminPort),
+          app,
+          release,
+          null,
+          async () => null,
+          checkHealth,
+          async (line) => {
+            await file.writeFile(`${line}\n`);
+            console.log(line);
+          },
+        );
+        await prune(
+          store,
+          docker,
+          app,
+          (row) =>
+            removeReleaseLogs(root, app.name, row.branch, row.number, store),
+          async (message) => {
+            await file.writeFile(`${message}\n`);
+          },
+          release.branch,
+        );
+      } finally {
+        await file.close();
+      }
+    },
+    signal,
+  );
 }

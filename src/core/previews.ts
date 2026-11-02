@@ -5,6 +5,7 @@ import { hostName } from "../adapters/validation";
 import { privatePath } from "../data";
 import type { App, Store } from "../store/interface";
 import { removeImages } from "./build";
+import { assertAppHost } from "./caddy-config";
 import { removeReleaseLogs } from "./logs";
 import { branchSlug } from "./validation";
 
@@ -98,6 +99,7 @@ export function availableHost(
   host: string,
   owner?: number,
 ): void {
+  assertAppHost(host);
   for (const app of store.apps()) {
     if (app.id === owner) continue;
     if (
