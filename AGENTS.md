@@ -10,14 +10,10 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 
 ## Status
 
-M0 done — 2026-11-01 (#9): toolchain, schema, adapter seams, e2e harness, CI. M1 done —
-2026-11-01 (#14): HOIST_DIR layout, apps verbs, SSH forced-command dispatch, pre-receive hook
-building `hoist/<app>:<slug>-v<n>-<sha12>` into a `built` release, migration 2, user-mode sshd
-e2e. M2 done — 2026-11-01 ([PR #19](https://github.com/ContractorKeith/hoist/pull/19)):
-cutover, Caddy routes, TLS and boot reconcile. M3 (config, rollback, retention) in progress —
-[draft PR #22](https://github.com/ContractorKeith/hoist/pull/22).
-M4 (logs) in progress — [draft PR #20](https://github.com/ContractorKeith/hoist/pull/20).
-M5 (previews) in progress — [draft PR #21](https://github.com/ContractorKeith/hoist/pull/21).
+M0–M4 done — 2026-11-01/02 (#9, #14, #19, #22, #20): toolchain and harness; apps, SSH dispatch,
+builds and releases; cutover, Caddy supervisor, reconcile, SQLite leases; encrypted config,
+rollback, restart, retention; live and per-release logs. M5 (previews) in progress — PR #21.
+M6 dashboard and M7 installer remain.
 
 ## Commands
 
