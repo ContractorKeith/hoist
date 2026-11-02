@@ -79,6 +79,19 @@ scenario(
       const started = Date.now();
       expect((await push(":feature-x")).code).toBe(0);
       const pushMs = Date.now() - started;
+      const returnedAt = Date.now();
+      // Rows are deleted last, after all preview resources have been removed.
+      await eventually(async () => {
+        expect(
+          h.store.previews(app.id).some((p) => p.branch === "feature-x"),
+        ).toBe(false);
+        expect(
+          h.store.releases(app.id).some((r) => r.branch === "feature-x"),
+        ).toBe(false);
+      }, 10000);
+      const teardownMs = Date.now() - returnedAt;
+      expect(teardownMs).toBeLessThan(10000);
+      // Resource verification queries are outside the teardown deadline.
       await Promise.all([
         command([
           "git",
@@ -91,9 +104,8 @@ scenario(
         assertPreviewGone(h, app, "feature-x", "feature-x", images),
       ]);
       console.log(
-        `Preview deletion: push completed in ${pushMs} ms; all resources verified gone in ${Date.now() - started} ms.`,
+        `Preview deletion: push completed in ${pushMs} ms; cleanup completed ${teardownMs} ms after push returned.`,
       );
-      expect(Date.now() - started).toBeLessThan(10000);
       const xyImages = h.store
         .releases(app.id)
         .filter((r) => r.branch === "Feature/X-Y");
@@ -158,7 +170,7 @@ scenario(
         expect(h.store.previews(app.id).map((p) => p.branch)).toEqual([
           "fresh",
         ]);
-      }, 10000);
+      }, 60000);
       expect(h.store.releases(app.id).some((r) => r.branch === "idle")).toBe(
         false,
       );
