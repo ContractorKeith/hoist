@@ -21,8 +21,9 @@ test.skipIf(process.env.HOIST_E2E !== "1")(
     try {
       await new Docker().ping();
     } catch {
-      console.log("Installer e2e skipped: the Docker socket is unavailable.");
-      return;
+      throw new Error(
+        "HOIST_E2E=1 requires Linux and a reachable Docker daemon",
+      );
     }
     await ok(["bun", "run", "build"]);
     const name = `hoist-install-${crypto.randomUUID()}`;
