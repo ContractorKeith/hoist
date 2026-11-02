@@ -33,6 +33,7 @@ export function route(host: string, upstream: string): Record<string, unknown> {
 export function caddyConfig(
   settings: CaddySettings,
   routes: ReleaseRoute[],
+  dashboard?: ReleaseRoute,
 ): CaddyConfig {
   return {
     admin: {
@@ -72,9 +73,10 @@ export function caddyConfig(
           hoist: {
             listen: [`:${settings.httpsPort}`],
             tls_connection_policies: [{}],
-            routes: newestRoutes(routes).map((item) =>
-              route(item.host, item.upstream),
-            ),
+            routes: newestRoutes([
+              ...routes,
+              ...(dashboard ? [dashboard] : []),
+            ]).map((item) => route(item.host, item.upstream)),
           },
         },
       },

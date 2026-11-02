@@ -14,6 +14,7 @@ import { caddySettings, serve } from "../server";
 import { SqliteStore } from "../store/sqlite";
 import { appsCommand, appsSet, parseCli } from "./apps";
 import { configCommand } from "./config";
+import { dashboardPassword } from "./dashboard";
 import { logsCommand } from "./logs";
 import { previewsCommand } from "./previews";
 import { releasesCommand } from "./releases";
@@ -32,6 +33,7 @@ const commands: Record<
   "config:set": (_root, store, args) => configCommand(store, args),
   "config:unset": (_root, store, args) => configCommand(store, args),
   "config:list": (_root, store, args) => configCommand(store, args),
+  "dashboard:set-password": dashboardPassword,
   releases: releasesCommand,
   logs: logsCommand,
   restart: releasesCommand,

@@ -13,7 +13,7 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 M0–M5 done — 2026-11-01/02 (#9, #14, #19, #22, #20, #21): toolchain and harness; apps, SSH
 dispatch, builds and releases; cutover, Caddy supervisor, reconcile, SQLite leases; encrypted
 config, rollback, restart, retention; live and per-release logs; preview branches with
-post-receive teardown and a TTL sweeper. M6 (dashboard) in progress. M7 installer remains.
+post-receive teardown and a TTL sweeper. M6 (dashboard) in progress (draft PR pending). M7 installer remains.
 
 ## Commands
 
@@ -78,6 +78,10 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - One process. Caddy is a supervised child; the preview sweeper is a timer. No queue.
 - A release's `image` and `config_json` are immutable (trigger); `status` and `container_id`
   change during cutover. Delete is governed by retention (M3).
+- Dashboard binds only `127.0.0.1:8700` (`HOIST_DASHBOARD_PORT`); Caddy serves `hoist.<HOIST_DOMAIN>` (`HOIST_DASHBOARD_HOST` overrides). Set the owner password with `hoist dashboard:set-password` (stdin or hidden TTY prompt).
+- Dashboard sessions last seven days; tokens are SHA-256 hashed in SQLite, cookies are Secure/HttpOnly/SameSite=Strict. Password changes revoke sessions. Login permits five failures per client IP per 15 minutes.
+- Every dashboard mutation is POST with CSRF, including logout; rollback/restart require confirmation. CSP allows only same-origin scripts/styles; log lines use textContent. Config rendering queries key names only.
+- E2e harnesses use unique app names and dashboard ports. Under heavy load, run Docker e2e with `flock /home/contractorkeith/.t3/worktrees/hoist/hoist-e2e.lock`; use `newgrp docker` when needed.
 - Dashboard is read-mostly: rollback and restart are its only actions. Everything else is CLI.
 - Tooling is Bun, `tsc --noEmit`, Biome. No ESLint, Prettier, Vitest, or ORM.
 - One milestone = one issue = one branch = one PR = one T3 thread in its own worktree. M0 lands

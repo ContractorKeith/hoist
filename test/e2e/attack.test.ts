@@ -25,7 +25,8 @@ scenario(
   "one supervisor per HOIST_DIR and SIGKILL restart reaps the recorded Caddy",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       expect((await h.push()).code).toBe(0);
       await eventually(async () => {
         expect(await (await h.request()).text()).toBe("hello from hoist\n");
@@ -64,7 +65,7 @@ scenario(
         expect(response.status).toBe(200);
         expect(await response.text()).toBe("hello from hoist\n");
       }
-      await h.control("apps:destroy", "hello", "--force");
+      await h.control("apps:destroy", appName, "--force");
     });
   },
   90000,
@@ -74,17 +75,18 @@ scenario(
   "reconcile waiting on bravo cannot overwrite a fresh hello cutover",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       expect((await h.push()).code).toBe(0);
-      await h.control("apps:create", "zbravo");
+      await h.control("apps:create", `zbravo-${appName}`);
       await h.stopServe();
       // Observe hello's lease release before starting its push; bravo remains held.
       h.store.db.exec(
-        "CREATE TABLE reconcile_probe (name TEXT); CREATE TRIGGER observe_hello_reconcile AFTER DELETE ON locks WHEN OLD.name = 'app:hello' BEGIN INSERT INTO reconcile_probe VALUES (OLD.name); END;",
+        `CREATE TABLE reconcile_probe (name TEXT); CREATE TRIGGER observe_reconcile AFTER DELETE ON locks WHEN OLD.name = 'app:${appName}' BEGIN INSERT INTO reconcile_probe VALUES (OLD.name); END;`,
       );
       // Apps are ordered by name; use a host after hello for the held second app.
       const locks = new SqliteAppLocks(h.store),
-        held = await locks.acquire("app:zbravo");
+        held = await locks.acquire(`app:zbravo-${appName}`);
       try {
         const launched = h.launchServe();
         await adminReady(h.admin);
@@ -98,7 +100,7 @@ scenario(
         const result = await h.push();
         expect(result.code).toBe(0);
         expect(launched.ready()).toBe(false);
-        const app = h.store.app("hello");
+        const app = h.store.app(appName);
         if (!app) throw new Error("missing app");
         const row = h.store
           .releases(app.id)
@@ -116,8 +118,8 @@ scenario(
         );
         expect(routes).toContain(upstream);
         expect(await (await h.request()).text()).toBe("fresh cutover\n");
-        await h.control("apps:destroy", "hello", "--force");
-        await h.control("apps:destroy", "zbravo", "--force");
+        await h.control("apps:destroy", appName, "--force");
+        await h.control("apps:destroy", `zbravo-${appName}`, "--force");
       } finally {
         held.release();
       }
@@ -130,11 +132,12 @@ scenario(
   "foreign container linkage never serves bravo's body at hello",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       expect((await h.push()).code).toBe(0);
-      await h.control("apps:create", "bravo");
-      const bravo = h.store.app("bravo"),
-        hello = h.store.app("hello");
+      await h.control("apps:create", `bravo-${appName}`);
+      const bravo = h.store.app(`bravo-${appName}`),
+        hello = h.store.app(appName);
       if (!bravo || !hello) throw new Error("missing apps");
       await writeFile(join(h.source, "index.html"), "BRAVO_SECRET\n");
       const row = reserveRelease(h.store, bravo, "main", "b".repeat(40));
@@ -143,7 +146,10 @@ scenario(
           {
             contextDir: h.source,
             tag: row.image,
-            labels: { "hoist.app": "bravo", "hoist.release": String(row.id) },
+            labels: {
+              "hoist.app": `bravo-${appName}`,
+              "hoist.release": String(row.id),
+            },
           },
           AbortSignal.timeout(30000),
         ),
@@ -176,13 +182,13 @@ scenario(
       for (let i = 0; i < 20; i++)
         expect(await (await h.request()).text()).not.toContain("BRAVO_SECRET");
       await eventually(async () => {
-        expect(await (await h.request("bravo.example.test")).text()).toBe(
-          "BRAVO_SECRET\n",
-        );
+        expect(
+          await (await h.request(`bravo-${appName}.example.test`)).text(),
+        ).toBe("BRAVO_SECRET\n");
       });
       expect((await h.docker.inspectContainer(bravoId))?.running).toBe(true);
-      await h.control("apps:destroy", "hello", "--force");
-      await h.control("apps:destroy", "bravo", "--force");
+      await h.control("apps:destroy", appName, "--force");
+      await h.control("apps:destroy", `bravo-${appName}`, "--force");
     });
   },
   90000,
@@ -192,14 +198,15 @@ scenario(
   "SIGKILLed hook leaves no built candidate after boot reconcile",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       await h.stopServe();
       await writeFile(
         join(h.source, "Dockerfile"),
         'FROM busybox:1.37.0\nEXPOSE 8080\nCMD ["sh","-c","while true; do nc -l -p 8080 >/dev/null; done"]\n',
       );
       const sha = await h.commit(),
-        repo = join(h.data, "repos/hello.git");
+        repo = join(h.data, `repos/${appName}.git`);
       await ok([
         "git",
         "--git-dir",
@@ -209,7 +216,7 @@ scenario(
         `${sha}:refs/lab/good`,
       ]);
       const hook = Bun.spawn(
-        [process.execPath, cli, "git-hook", "pre-receive", "hello"],
+        [process.execPath, cli, "git-hook", "pre-receive", appName],
         {
           env: h.env,
           cwd: repo,
@@ -222,27 +229,27 @@ scenario(
       try {
         await eventually(async () => {
           const containers = await h.docker.listContainers({
-            "hoist.app": "hello",
+            "hoist.app": appName,
           });
           expect(containers).toHaveLength(1);
           expect(
             (await h.docker.inspectContainer(containers[0]?.id ?? ""))?.running,
           ).toBe(true);
         }, 30000);
-        expect(h.store.lock("app:hello")?.owner_pid).toBe(hook.pid);
+        expect(h.store.lock(`app:${appName}`)?.owner_pid).toBe(hook.pid);
         hook.kill("SIGKILL");
         await hook.exited;
         await output;
         await h.startServe();
-        const app = h.store.app("hello");
+        const app = h.store.app(appName);
         if (!app) throw new Error("missing app");
         expect(h.store.releases(app.id)[0]?.status).toBe("failed");
         expect(h.getLogs()).toContain("interrupted before cutover");
-        expect(await h.docker.listContainers({ "hoist.app": "hello" })).toEqual(
+        expect(await h.docker.listContainers({ "hoist.app": appName })).toEqual(
           [],
         );
-        expect(h.store.lock("app:hello")).toBeNull();
-        await h.control("apps:destroy", "hello", "--force");
+        expect(h.store.lock(`app:${appName}`)).toBeNull();
+        await h.control("apps:destroy", appName, "--force");
       } finally {
         if (hook.exitCode === null) hook.kill("SIGKILL");
         await hook.exited;
@@ -257,10 +264,11 @@ scenario(
   "SIGTERM cancels serve waiting on an app lease within five seconds",
   async () => {
     await withSSH(async (h) => {
-      await h.control("apps:create", "hello");
+      const { appName } = h;
+      await h.control("apps:create", appName);
       await h.stopServe();
       const locks = new SqliteAppLocks(h.store),
-        held = await locks.acquire("app:hello");
+        held = await locks.acquire(`app:${appName}`);
       try {
         const launched = h.launchServe();
         await adminReady(h.admin);
@@ -274,11 +282,11 @@ scenario(
         ]);
         expect(Date.now() - started).toBeLessThan(5000);
         expect(h.store.lock("serve")).toBeNull();
-        expect(locks.isLocked("hello")).toBe(true);
+        expect(locks.isLocked(appName)).toBe(true);
       } finally {
         held.release();
       }
-      await h.control("apps:destroy", "hello", "--force");
+      await h.control("apps:destroy", appName, "--force");
     });
   },
   30000,

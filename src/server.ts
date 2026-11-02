@@ -19,6 +19,7 @@ import { reconcile } from "./core/reconcile";
 import { dataRoot, privatePath } from "./data";
 import { finishSupervisor, scheduleSweep } from "./preview-timer";
 import { SqliteStore } from "./store/sqlite";
+import { dashboardRoute, startDashboard } from "./web/server";
 
 export function caddySettings(root: string): CaddySettings {
   const tls = process.env.HOIST_TLS ?? "acme";
@@ -51,12 +52,20 @@ export async function serve(): Promise<void> {
   const startedAt = new Date().toISOString();
   const root = dataRoot(),
     settings = caddySettings(root);
+  const dashboard = dashboardRoute();
+  if (
+    [settings.adminPort, settings.httpPort, settings.httpsPort].includes(
+      dashboard.port,
+    )
+  )
+    throw new Error("Dashboard and Caddy ports must be distinct");
   const store = new SqliteStore(root),
     docker = new Docker(),
     caddy = new Caddy(settings.adminPort);
   const locks = new SqliteAppLocks(store);
   const shutdown = new AbortController();
   let lease: Awaited<ReturnType<SqliteAppLocks["acquire"]>> | undefined;
+  let web: ReturnType<typeof startDashboard> | undefined;
   let stopping = false;
   let stoppingChild: Promise<void> | undefined;
   let child: ReturnType<typeof Bun.spawn> | undefined;
@@ -89,6 +98,7 @@ export async function serve(): Promise<void> {
     });
     shutdown.signal.throwIfAborted();
     await docker.ping();
+    web = startDashboard(root, store, docker);
     const binary = await ensureCaddy();
     const configPath = privatePath(
       join(root, "caddy.json"),
@@ -133,7 +143,7 @@ export async function serve(): Promise<void> {
       }
       await Bun.write(
         configPath,
-        JSON.stringify(caddyConfig(settings, newestRoutes(routes))),
+        JSON.stringify(caddyConfig(settings, newestRoutes(routes), dashboard)),
       );
       const childStarted = Date.now();
       child = Bun.spawn([binary, "run", "--config", configPath], {
@@ -191,6 +201,7 @@ export async function serve(): Promise<void> {
             startedAt,
             console.error,
             shutdown.signal,
+            dashboard,
           );
           boot = false;
           sweeper.start();
@@ -239,6 +250,7 @@ export async function serve(): Promise<void> {
         if (child) lease?.setChild(null);
       },
     );
+    await web?.stop();
     lease?.release();
     process.off("SIGTERM", stop);
     process.off("SIGINT", stop);

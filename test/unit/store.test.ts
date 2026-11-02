@@ -40,11 +40,17 @@ test("fresh data directory migrates to the recorded current schema in WAL mode",
       )
       .all(),
   ).toEqual(
-    ["apps", "config", "locks", "previews", "releases", "sessions"].map(
-      (name) => ({
-        name,
-      }),
-    ),
+    [
+      "apps",
+      "config",
+      "locks",
+      "previews",
+      "releases",
+      "sessions",
+      "settings",
+    ].map((name) => ({
+      name,
+    })),
   );
 });
 

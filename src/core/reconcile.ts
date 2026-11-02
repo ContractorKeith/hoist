@@ -5,6 +5,7 @@ import type {
 } from "../adapters/interfaces";
 import type { Store } from "../store/interface";
 import { removeImages } from "./build";
+import type { ReleaseRoute } from "./caddy-config";
 import { type HealthCheck, ownsContainer, recoverLive } from "./cutover";
 import { releaseHost } from "./previews";
 
@@ -17,6 +18,7 @@ export async function reconcile(
   startedAt = new Date().toISOString(),
   report: (message: string) => void = console.error,
   signal?: AbortSignal,
+  dashboard?: ReleaseRoute,
 ): Promise<string[]> {
   const errors: string[] = [];
   const record = (context: string, error: unknown) => {
@@ -167,6 +169,13 @@ export async function reconcile(
     }
   } catch (error) {
     record("orphan sweep", error);
+  }
+  if (dashboard && !signal?.aborted) {
+    try {
+      await caddy.upsertRoute(dashboard.host, dashboard.upstream);
+    } catch (error) {
+      record("dashboard route", error);
+    }
   }
   return errors;
 }

@@ -83,6 +83,7 @@ export const migrations = [
   INSERT OR IGNORE INTO previews(app_id, branch, slug, last_push_at)
     SELECT app_id, branch, trim(slug, '-'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     FROM collapsed WHERE instr(slug, '--') = 0;`,
+  `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 ] as const;
 
 export const schemaVersion = migrations.length;
