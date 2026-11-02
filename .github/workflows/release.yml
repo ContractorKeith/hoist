@@ -1,0 +1,43 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - run: bun install --frozen-lockfile
+      - run: bun run release:check
+      - name: Assemble checksums and release notes
+        shell: bash
+        run: |
+          cd .tmp
+          sha256sum hoist-linux-x64 hoist-linux-arm64 > checksums.txt
+          ./hoist-linux-x64 version
+          cd ..
+          # Embed binary digests in the installer asset; keep the repository block empty.
+          x64_sha=$(awk '$2 == "hoist-linux-x64" { print $1 }' .tmp/checksums.txt)
+          arm64_sha=$(awk '$2 == "hoist-linux-arm64" { print $1 }' .tmp/checksums.txt)
+          sed -i "/^# BEGIN HOIST PINS/,/^# END HOIST PINS/ { s/^HOIST_X64_SHA256=.*/HOIST_X64_SHA256=$x64_sha/; s/^HOIST_ARM64_SHA256=.*/HOIST_ARM64_SHA256=$arm64_sha/; }" install.sh
+          version=${GITHUB_REF_NAME#v}
+          version=${version%%-rc*}
+          awk -v v="$version" '/^## / { if (found) exit; if ($2 == v) { found=1; next } } found' CHANGELOG.md > .tmp/notes.md
+          test -s .tmp/notes.md
+      - name: Run arm64 binary
+        run: docker run --rm --platform linux/arm64 -v "$PWD/.tmp:/release:ro" ubuntu:24.04 /release/hoist-linux-arm64 version
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          .tmp/hoist-linux-x64 .tmp/hoist-linux-arm64 .tmp/checksums.txt install.sh
+          --title "hoist $GITHUB_REF_NAME" --notes-file .tmp/notes.md

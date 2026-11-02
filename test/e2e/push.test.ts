@@ -186,10 +186,13 @@ scenario(
       // Warm Bun's HTTP machinery before measuring persistent connections.
       await (await build()).cancel();
       await Bun.sleep(200);
+      // Idle HTTP connections may close too; cleanup must never increase the count.
       const baseline = (await readdir("/proc/self/fd")).length;
       for (let i = 0; i < 5; i++) await (await build()).cancel();
       await eventually(async () => {
-        expect((await readdir("/proc/self/fd")).length).toBe(baseline);
+        expect((await readdir("/proc/self/fd")).length).toBeLessThanOrEqual(
+          baseline,
+        );
       });
       for (let i = 0; i < 5; i++) {
         const controller = new AbortController();
@@ -200,7 +203,9 @@ scenario(
         controller.abort();
       }
       await eventually(async () => {
-        expect((await readdir("/proc/self/fd")).length).toBe(baseline);
+        expect((await readdir("/proc/self/fd")).length).toBeLessThanOrEqual(
+          baseline,
+        );
       });
       console.log(
         `Docker cancellation: five early cancellations and five abandoned streams aborted; fd baseline ${baseline} restored.`,

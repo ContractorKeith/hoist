@@ -33,3 +33,19 @@ jobs:
           grep -Fx ' 0 fail' /tmp/hoist-e2e.log
           grep -F 'Teardown verified' /tmp/hoist-e2e.log
       - run: bun run build && ./dist/hoist version
+  release-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - run: mkdir -p .tmp && bun run release:check
+      - run: .tmp/hoist-linux-x64 version
+      - run: docker run --rm --platform linux/arm64 -v "$PWD/.tmp:/release:ro" ubuntu:24.04 /release/hoist-linux-arm64 version
+      - run: sh -n install.sh
+      - run: if command -v shellcheck >/dev/null; then shellcheck install.sh; else echo "shellcheck absent"; fi

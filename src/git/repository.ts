@@ -1,12 +1,17 @@
+import { randomUUID } from "node:crypto";
 import {
   chmod,
   lstat,
   mkdtemp,
+  open,
+  readdir,
+  readFile,
   realpath,
+  rename,
   rm,
-  writeFile,
 } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
+import { processAlive } from "../adapters/app-lock";
 import { appName, branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 
@@ -46,19 +51,107 @@ export async function createRepo(root: string, name: string): Promise<void> {
   privatePath(repo, true, true, root);
   try {
     await git(["init", "--bare", "--initial-branch=main", repo]);
-    for (const hook of ["pre-receive", "post-receive"]) {
-      const path = join(repo, "hooks", hook);
-      await writeFile(
-        path,
-        `#!/bin/sh\nexec ${executableCommand()} git-hook ${hook} ${shellQuote(name)}\n`,
-        { mode: 0o700 },
-      );
-      await chmod(path, 0o700);
-    }
+    await rewriteHooks(root, name);
   } catch (error) {
     await rm(repo, { recursive: true, force: true });
     throw error;
   }
+}
+
+const activeStaging = new Set<string>();
+
+// Keep creation and upgrade repair on exactly the same hook template.
+export async function rewriteHooks(
+  root: string,
+  name: string,
+): Promise<string[]> {
+  appName(name);
+  const changes: string[] = [];
+  for (const hook of ["pre-receive", "post-receive"]) {
+    const directory = privatePath(
+      join(root, "repos", `${name}.git`, "hooks"),
+      true,
+      false,
+      root,
+    );
+    // Remove abandoned files, but never unlink another running repair's staging file.
+    for (const staged of await readdir(directory)) {
+      if (!staged.startsWith(`.${hook}.`) || !staged.endsWith(".next"))
+        continue;
+      const candidate = join(directory, staged);
+      const pid = Number(staged.slice(hook.length + 2).split(".")[0]);
+      if (
+        activeStaging.has(candidate) ||
+        (pid > 0 &&
+          pid <= 2147483647 &&
+          Number.isInteger(pid) &&
+          pid !== process.pid &&
+          processAlive(pid))
+      )
+        continue;
+      await rm(candidate, { force: true });
+    }
+    const path = join(directory, hook);
+    const entry = await lstat(path).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (entry && !entry.isFile())
+      throw new Error(`${path} must be a regular file`);
+    const expected = `#!/bin/sh\nexec ${executableCommand()} git-hook ${hook} ${shellQuote(name)}\n`;
+    const previous = entry ? await readFile(path, "utf8") : "";
+    if (previous !== expected) {
+      const next = join(
+        directory,
+        `.${hook}.${process.pid}.${randomUUID()}.next`,
+      );
+      activeStaging.add(next);
+      try {
+        const file = await open(next, "wx", 0o700);
+        try {
+          await file.writeFile(expected);
+        } finally {
+          // Close the writable descriptor before publishing so Git can exec immediately.
+          await file.close();
+        }
+        await rename(next, path);
+      } catch (error) {
+        await rm(next, { force: true });
+        throw error;
+      } finally {
+        activeStaging.delete(next);
+      }
+      changes.push(
+        `${name} ${hook}: replaced ${previous.trim().replace(/\s+/g, " ")} with ${expected.trim().replace(/\s+/g, " ")}`,
+      );
+    }
+    await chmod(path, 0o700);
+  }
+  return changes;
+}
+export async function repairRepoHooks(root: string): Promise<string[]> {
+  const repos = privatePath(join(root, "repos"), true, false, root);
+  const changes: string[] = [];
+  for (const entry of await readdir(repos)) {
+    try {
+      if (!entry.endsWith(".git")) throw new Error("not a bare repository");
+      appName(entry.slice(0, -4));
+      const repo = join(repos, entry);
+      const [head, objects] = await Promise.all([
+        lstat(join(repo, "HEAD")).catch(() => null),
+        lstat(join(repo, "objects")).catch(() => null),
+      ]);
+      if (!head?.isFile() || !objects?.isDirectory())
+        throw new Error("not a bare repository");
+    } catch (error) {
+      changes.push(
+        `skipped ${entry}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
+    changes.push(...(await rewriteHooks(root, entry.slice(0, -4))));
+  }
+  return changes;
 }
 
 export async function confinedContext(

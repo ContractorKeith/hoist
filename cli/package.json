@@ -1,0 +1,17 @@
+{
+  "name": "@contractorkeith/hoist",
+  "version": "0.1.0",
+  "description": "Control your hoist server over SSH",
+  "type": "module",
+  "bin": {
+    "hoist": "bin/hoist.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin",
+    "verbs.json"
+  ],
+  "license": "MIT"
+}

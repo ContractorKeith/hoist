@@ -1,0 +1,28 @@
+[Unit]
+Description=Hoist app server
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=hoist
+Group=hoist
+SupplementaryGroups=docker
+EnvironmentFile=/etc/hoist/hoist.env
+Environment=HOME=/var/lib/hoist
+ExecStart=/usr/local/bin/hoist serve
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/hoist
+
+[Install]
+WantedBy=multi-user.target

@@ -15,9 +15,35 @@ import { SqliteStore } from "../store/sqlite";
 import { appsCommand, appsSet, parseCli } from "./apps";
 import { configCommand } from "./config";
 import { dashboardPassword } from "./dashboard";
+import { doctor } from "./doctor";
 import { logsCommand } from "./logs";
 import { previewsCommand } from "./previews";
 import { releasesCommand } from "./releases";
+
+// Public CLI contract, shared with generated client help and README.
+export const verbs = [
+  "apps:create <name> [--domain <fqdn>] [--health-path </path>]",
+  "apps:list [--json]",
+  "apps:info <name> [--json]",
+  "apps:destroy <name> [--force]",
+  "apps:set <name> retention=N|branch=<name>",
+  "config:set <name> K=V [K=V...]",
+  "config:unset <name> K",
+  "config:list <name> [--reveal] [--json]",
+  "releases <name> [--branch <b>] [--json]",
+  "rollback <name> [vN]",
+  "restart <name>",
+  "logs <name> [-f] [--release vN] [--branch <b>] [-n <lines>]",
+  "previews:list <name> [--json]",
+  "previews:destroy <name> <branch>",
+  "dashboard:set-password",
+  "doctor [--json]",
+  "version",
+  "ssh-dispatch",
+  "serve",
+];
+export const usage = () =>
+  `Usage: hoist <verb>\n${verbs.map((verb) => `  ${verb}`).join("\n")}`;
 
 // Compare recreation against process start, before delay or lease acquisition.
 const hookStartedAt = performance.timeOrigin;
@@ -30,6 +56,8 @@ const commands: Record<
     args: string[],
   ) => number | void | Promise<number> | Promise<void>
 > = {
+  // Doctor is here only for the ssh-dispatch allowlist; direct calls run above store setup.
+  doctor: (_root, _store, args) => doctor(args),
   "config:set": (_root, store, args) => configCommand(store, args),
   "config:unset": (_root, store, args) => configCommand(store, args),
   "config:list": (_root, store, args) => configCommand(store, args),
@@ -52,6 +80,11 @@ export { parseCli } from "./apps";
 export async function run(args: string[]): Promise<number> {
   let store: SqliteStore | undefined;
   try {
+    if (args[0] === "--help" && args.length === 1) {
+      console.log(usage());
+      return 0;
+    }
+    if (args[0] === "doctor") return await doctor(args);
     if (args[0] === "serve" && args.length === 1) {
       await serve();
       return 0;
@@ -144,6 +177,7 @@ export async function run(args: string[]): Promise<number> {
       store = new SqliteStore(root);
       return (await handler(root, store, args)) ?? 0;
     }
+    if (args[0] !== "version") throw new Error(usage());
     parseCli(args);
     console.log(version);
     return 0;
