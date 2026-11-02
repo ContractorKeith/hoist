@@ -2,9 +2,7 @@ import { Docker } from "../adapters/docker";
 import { knownApp } from "../core/apps";
 import { checkLogPath, liveLogs, releaseLogPath } from "../core/logs";
 import { appName, branchSlug } from "../core/validation";
-import { dataRoot } from "../data";
-import type { App } from "../store/interface";
-import { SqliteStore } from "../store/sqlite";
+import type { App, Store } from "../store/interface";
 
 const usage =
   "Usage: hoist logs <app> [-f] [-n <lines>] [--release vN] [--branch <b>]";
@@ -50,10 +48,13 @@ export function parseLogs(args: string[], app?: App) {
   return options;
 }
 
-export async function runLogs(args: string[]): Promise<number> {
+export async function logsCommand(
+  root: string,
+  store: Store,
+  command: string[],
+): Promise<number> {
+  const args = command.slice(1);
   const options = parseLogs(args);
-  const root = dataRoot();
-  const store = new SqliteStore(root);
   const controller = new AbortController();
   const abort = () => controller.abort();
   process.on("SIGINT", abort);
@@ -90,6 +91,5 @@ export async function runLogs(args: string[]): Promise<number> {
   } finally {
     process.off("SIGINT", abort);
     process.off("SIGTERM", abort);
-    store.close();
   }
 }

@@ -137,6 +137,19 @@ scenario(
           reader.releaseLock();
           await stderr;
         }
+        const rollback = await h.control("rollback", "hello", "v1");
+        expect(rollback.stdout).toContain("Live: https://");
+        const saved = await h.control("logs", "hello", "--release", "v3");
+        for (const step of [
+          "Starting new container",
+          "Health check passed",
+          "Swapping Caddy upstream",
+          "Stopping previous container",
+          "Live: https://",
+        ])
+          expect(saved.stdout).toContain(step);
+        expect(saved.stdout).not.toContain('{"stream":');
+        expect(await (await h.request()).text()).toBe("hello from hoist\n");
       } finally {
         if (child.exitCode === null) child.kill("SIGKILL");
         await child.exited;

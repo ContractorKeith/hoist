@@ -1,11 +1,10 @@
 import { expect, test } from "bun:test";
-import { parseCli } from "../../src/cli";
 import { parseLogs } from "../../src/cli/logs";
 import { releaseLogPath } from "../../src/core/logs";
 
 const options = { app: "hello", branch: "main", follow: false, lines: 100 };
 
-test("logs parses defaults, all flags, and registers for SSH validation", () => {
+test("logs parses defaults and all flags", () => {
   expect(parseLogs(["hello"])).toEqual({ ...options, release: undefined });
   expect(
     parseLogs(["hello", "-f", "-n", "1", "--branch", "feature/x"]),
@@ -17,7 +16,6 @@ test("logs parses defaults, all flags, and registers for SSH validation", () => 
     release: undefined,
   });
   expect(parseLogs(["hello", "-n", "10000"]).lines).toBe(10000);
-  expect(parseCli(["logs", "hello", "--release", "v2"]).verb).toBe("logs");
   for (const args of [
     [],
     ["../hello"],

@@ -2,7 +2,6 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { SqliteAppLocks } from "../adapters/app-lock";
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
-import { removeReleaseLogs } from "../cli/releases";
 import {
   buildRelease,
   removeReleaseImages,
@@ -10,6 +9,7 @@ import {
 } from "../core/build";
 import { buildLogDecoder } from "../core/build-logs";
 import { cutover, type HealthCheck } from "../core/cutover";
+import { removeReleaseLogs } from "../core/logs";
 import { prune } from "../core/retention";
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
@@ -178,7 +178,8 @@ async function receiveLocked(
           store,
           docker,
           app,
-          removeReleaseLogs(root, app.name),
+          (row) =>
+            removeReleaseLogs(root, app.name, row.branch, row.number, store),
           async (message) => {
             await logFile.writeFile(`${message}\n`);
           },
