@@ -92,8 +92,11 @@ export async function run(args: string[]): Promise<number> {
     if (args[0] === "ssh-dispatch" && args.length === 1) {
       const command = parseDispatch(process.env.SSH_ORIGINAL_COMMAND ?? "");
       if (command.kind === "cli") {
-        if (!Object.hasOwn(commands, command.args[0] ?? ""))
-          parseCli(command.args); // Internal entry points are never exposed over SSH.
+        if (
+          !Object.hasOwn(commands, command.args[0] ?? "") &&
+          !["--help", "version"].includes(command.args[0] ?? "")
+        )
+          throw new Error(usage()); // Internal entry points are never exposed over SSH.
         return run(command.args);
       }
       const root = dataRoot();
