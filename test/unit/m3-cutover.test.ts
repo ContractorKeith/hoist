@@ -104,28 +104,82 @@ test("cutover refuses existing damaged config even when its own snapshot decrypt
   );
 });
 
-
 test("Caddy rebuild during old-container stop routes to the committed new release", async () => {
-  const store = new FakeStore(), docker = new FakeDocker(), caddy = new FakeCaddy();
+  const store = new FakeStore(),
+    docker = new FakeDocker(),
+    caddy = new FakeCaddy();
   const app = store.createApp("hello", "hello.test", "/");
   const old = reserveRelease(store, app, "main", "a".repeat(40));
   store.completeRelease(old.id);
-  const run = (release: typeof old) => cutover(store, docker, caddy, app, release, null, async () => null, async () => {});
+  const run = (release: typeof old) =>
+    cutover(
+      store,
+      docker,
+      caddy,
+      app,
+      release,
+      null,
+      async () => null,
+      async () => {},
+    );
   await run(old);
-  const oldId = old.container_id!;
+  const oldId = old.container_id ?? "";
   const next = reserveRelease(store, app, "main", "b".repeat(40));
   store.completeRelease(next.id);
   const swap = caddy.upsertRoute.bind(caddy);
-  caddy.upsertRoute = async (...args) => { await swap(...args); caddy.routes.clear(); };
+  caddy.upsertRoute = async (...args) => {
+    await swap(...args);
+    caddy.routes.clear();
+  };
   const stop = docker.stopContainer.bind(docker);
   docker.stopContainer = async (id) => {
-    const routes = await bootRoutes(store, docker, { host: "hoist.test", upstream: "127.0.0.1:8700" }, () => {});
-    const info = await docker.inspectContainer(next.container_id!);
-    expect(routes).toMatchObject([{ host: app.domain, upstream: `127.0.0.1:${info?.port}`, releaseId: next.id }]);
+    const routes = await bootRoutes(
+      store,
+      docker,
+      { host: "hoist.test", upstream: "127.0.0.1:8700" },
+      () => {},
+    );
+    const info = await docker.inspectContainer(next.container_id ?? "");
+    expect(routes).toMatchObject([
+      {
+        host: app.domain,
+        upstream: `127.0.0.1:${info?.port}`,
+        releaseId: next.id,
+      },
+    ]);
     for (const route of routes) await swap(route.host, route.upstream);
     await stop(id);
   };
   await run(next);
   expect(docker.containers.has(oldId)).toBe(false);
-  expect(caddy.routes.get(app.domain)).toBe(`127.0.0.1:${(await docker.inspectContainer(next.container_id!))?.port}`);
+  expect(caddy.routes.get(app.domain)).toBe(
+    `127.0.0.1:${(await docker.inspectContainer(next.container_id ?? ""))?.port}`,
+  );
+});
+
+test("failed candidate removal appends cleanup detail without masking health failure", async () => {
+  const store = new FakeStore(),
+    docker = new FakeDocker(),
+    caddy = new FakeCaddy();
+  const app = store.createApp("hello", "hello.test", "/");
+  const release = reserveRelease(store, app, "main", "a".repeat(40));
+  store.completeRelease(release.id);
+  docker.removeContainer = async () => {
+    throw new Error("Docker DELETE 404");
+  };
+  await expect(
+    cutover(
+      store,
+      docker,
+      caddy,
+      app,
+      release,
+      null,
+      async () => null,
+      async () => {
+        throw new Error("Health check HTTP 500");
+      },
+    ),
+  ).rejects.toThrow("Health check HTTP 500; cleanup: Docker DELETE 404");
+  expect(release.status).toBe("failed");
 });

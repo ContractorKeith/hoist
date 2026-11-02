@@ -72,7 +72,15 @@ async function startHealthy(
   } catch (error) {
     if (id) {
       await docker.stopContainer(id).catch(() => {});
-      await docker.removeContainer(id);
+      try {
+        await docker.removeContainer(id);
+      } catch (cleanup) {
+        const detail = (value: unknown) =>
+          value instanceof Error ? value.message : String(value);
+        throw new Error(`${detail(error)}; cleanup: ${detail(cleanup)}`, {
+          cause: error,
+        });
+      }
     }
     throw error;
   }
