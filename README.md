@@ -149,6 +149,25 @@ removed. Shared image tags used by retained rollbacks stay. Failed releases are 
 after image cleanup is attempted, while their log directories stay for M4. Masked config
 listings omit value lengths; `--reveal` includes values and byte lengths.
 
+## Logs
+
+```bash
+ssh hoist@server hoist logs hello
+ssh hoist@server hoist logs hello -n 1
+ssh hoist@server hoist logs hello -f
+ssh hoist@server hoist logs hello --release v2
+ssh hoist@server hoist logs hello --branch feature-x
+```
+
+Runtime output comes from Docker, defaults to the last 100 lines, and accepts `-n`
+from 1 to 10000. Bytes pass through with carriage returns removed. `-f` streams
+until Ctrl-C or another release takes over; takeover prints the new release number
+and exits successfully. The live release is checked every two seconds.
+
+`--release vN` reads the complete build and cutover log at
+`$HOIST_DIR/releases/<app>/<branch-slug>/vN/build.log`, including failed pushes.
+It cannot be combined with `-f` or `-n`. The branch defaults to `main`.
+
 ## Development
 
 ```bash

@@ -272,10 +272,16 @@ export class Docker implements DockerClient {
     id: string,
     follow = false,
     signal?: AbortSignal,
+    tail?: number,
   ): Promise<LogStream> {
     validate.containerId(id);
+    if (
+      tail !== undefined &&
+      (!Number.isInteger(tail) || tail < 1 || tail > 10000)
+    )
+      throw new Error("Invalid log tail");
     const response = await this.request(
-      `/containers/${id}/logs?stdout=true&stderr=true&follow=${follow}`,
+      `/containers/${id}/logs?stdout=true&stderr=true&follow=${follow}&tail=${tail ?? "all"}`,
       { signal: signal ?? (follow ? null : AbortSignal.timeout(30000)) },
     );
     if (!response.body) throw new Error("Docker logs response missing body");

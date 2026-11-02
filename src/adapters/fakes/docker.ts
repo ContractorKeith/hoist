@@ -81,8 +81,9 @@ export class FakeDocker implements DockerClient {
     id: string,
     follow = false,
     signal?: AbortSignal,
+    tail?: number,
   ): Promise<LogStream> {
-    this.record("containerLogs", id, follow, signal);
+    this.record("containerLogs", id, follow, signal, tail);
     return new Blob(["hello\n"]).stream();
   }
   async listContainers(labels: Labels): Promise<Container[]> {

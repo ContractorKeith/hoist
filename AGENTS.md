@@ -44,6 +44,7 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - Closing the terminal mid-push does not cancel the deploy; the release still lands server-side.
 - `HOIST_DIR` (default `/var/lib/hoist`) holds the private database, bare repos, temporary checkouts and release logs; `HOIST_DOMAIN` supplies the default base domain until M7.
 - Docker containers use `Tty: true`: logs are plain bytes with CRLF line endings and stderr merged into stdout; M4 strips `\r`.
+- `logs` reads runtime bytes from the Docker API with `\r` stripped; `--release vN` reads the per-release `build.log` file.
 - The generated pre-receive hook hard-codes the executable path at `apps:create` time; M7 `doctor` will rewrite hooks.
 - Bare repos install a tiny executable `pre-receive` hook that execs `hoist git-hook pre-receive <app>`; pushed values never reach a shell.
 - On Omarchy, a shell missing the Docker group must run socket commands via `newgrp docker` on stdin; CI needs no wrapper.

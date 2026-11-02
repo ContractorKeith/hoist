@@ -12,6 +12,7 @@ import { caddySettings, serve } from "../server";
 import { SqliteStore } from "../store/sqlite";
 import { appsCommand, appsSet, parseCli } from "./apps";
 import { configCommand } from "./config";
+import { runLogs } from "./logs";
 import { releasesCommand } from "./releases";
 
 const commands: Record<
@@ -26,6 +27,7 @@ const commands: Record<
   "config:unset": (_root, store, args) => configCommand(store, args),
   "config:list": (_root, store, args) => configCommand(store, args),
   releases: releasesCommand,
+  logs: (_root, _store, args) => runLogs(args.slice(1)),
   restart: releasesCommand,
   rollback: releasesCommand,
   "apps:create": appsCommand,
