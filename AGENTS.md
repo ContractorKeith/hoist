@@ -12,7 +12,8 @@ in §10 on a fresh Ubuntu server and in GitHub Actions.
 
 M0–M6 merged on main (04c404e): push, cutover, encrypted config, rollback,
 logs, previews and dashboard. M7 installer, doctor, client and release workflow
-in progress (draft PR link added when opened). The orchestrator sets v0.1.0 after merge.
+in progress ([draft PR #24](https://github.com/ContractorKeith/hoist/pull/24)).
+The orchestrator sets v0.1.0 after merge.
 
 ## Commands
 
