@@ -1,6 +1,6 @@
 import { expect } from "bun:test";
 import { mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { stopChild } from "../../src/adapters/process";
 import { connectPage } from "./browser-cdp";
 import { eventually } from "./harness";
@@ -26,7 +26,8 @@ export async function checkBrowserLogs(
   }
   const profile = join(h.root, "chromium");
   // A short alias avoids Linux's Unix-socket path limit on deeply nested worktrees.
-  await mkdir(join(process.cwd(), ".tmp"), { recursive: true });
+  const root = resolve(import.meta.dir, "../..");
+  await mkdir(join(root, ".tmp"), { recursive: true });
   const child = Bun.spawn(
     [
       executable,
@@ -43,6 +44,7 @@ export async function checkBrowserLogs(
       "about:blank",
     ],
     {
+      cwd: root,
       env: { ...h.env, TMPDIR: "/proc/self/cwd/.tmp" },
       stdout: "ignore",
       stderr: "ignore",
