@@ -73,3 +73,26 @@ export function buildLogDecoder(write: (chunk: Uint8Array) => Promise<void>) {
     },
   };
 }
+
+// Git sideband truncates at NUL; keep the durable bytes and escape only the pusher copy.
+export function releaseLogSink(
+  save: (chunk: Uint8Array) => Promise<unknown>,
+  push: (chunk: Uint8Array) => Promise<unknown>,
+) {
+  return async (chunk: Uint8Array): Promise<void> => {
+    await save(chunk);
+    const zeros = chunk.reduce((count, byte) => count + Number(byte === 0), 0);
+    let output = chunk;
+    if (zeros) {
+      output = new Uint8Array(chunk.length + zeros);
+      let index = 0;
+      for (const byte of chunk) {
+        if (byte === 0) {
+          output[index++] = 92;
+          output[index++] = 48;
+        } else output[index++] = byte;
+      }
+    }
+    await push(output).catch(() => {});
+  };
+}

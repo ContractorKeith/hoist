@@ -129,4 +129,9 @@ export async function run(args: string[]): Promise<number> {
   }
 }
 
-if (import.meta.main) process.exitCode = await run(Bun.argv.slice(2));
+if (import.meta.main) {
+  const code = await run(Bun.argv.slice(2));
+  // A blocked native stdout write can outlive the command's completed cleanup.
+  if (code === 130 || code === 143) process.exit(code);
+  process.exitCode = code;
+}

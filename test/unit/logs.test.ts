@@ -30,7 +30,7 @@ test("runtime logs preserve escape sequences and non-UTF-8 bytes, removing only 
     await original(...args);
     return new ReadableStream({
       start(c) {
-        c.enqueue(new Uint8Array([27, 91, 51, 49, 109, 255, 13]));
+        c.enqueue(new Uint8Array([27, 91, 51, 49, 109, 255, 0, 13]));
         c.enqueue(new Uint8Array([10, 13, 65, 10]));
         c.close();
       },
@@ -47,7 +47,7 @@ test("runtime logs preserve escape sequences and non-UTF-8 bytes, removing only 
     },
   );
   expect([...Buffer.concat(chunks)]).toEqual([
-    27, 91, 51, 49, 109, 255, 10, 65, 10,
+    27, 91, 51, 49, 109, 255, 0, 10, 65, 10,
   ]);
   expect(docker.calls[0]?.args.slice(0, 2)).toEqual(["a".repeat(64), false]);
   expect(docker.calls[0]?.args[3]).toBe(1);
@@ -161,6 +161,22 @@ test("prune hook removes stopped logs, protects live logs, and refuses symlinks"
     await expect(
       removeReleaseLogs(root, "hello", "main", 1, store),
     ).rejects.toThrow("symlink");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a branch slug alias cannot remove the live release's log directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hoist-log-alias-"));
+  try {
+    const { store } = setup("Feature/X");
+    const path = releaseLogPath(root, "hello", "Feature/X", "v1");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, "live\n");
+    await expect(
+      removeReleaseLogs(root, "hello", "feature-x", 1, store),
+    ).rejects.toThrow("live release");
+    expect((await stat(path)).isFile()).toBe(true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -48,7 +48,7 @@ export async function removeReleaseLogs(
       .releases(owner.id)
       .some(
         (row) =>
-          row.branch === branch &&
+          branchSlug(row.branch) === branchSlug(branch) &&
           row.number === number &&
           row.status === "live",
       )

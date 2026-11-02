@@ -46,6 +46,8 @@ export async function buildRelease(
   log: (chunk: Uint8Array) => Promise<void>,
   signal: AbortSignal,
   beforeComplete: () => Promise<void> = async () => {},
+  logFailure: (message: string) => Promise<void> = (message) =>
+    log(new TextEncoder().encode(`${message}\n`)),
 ): Promise<void> {
   try {
     signal.throwIfAborted();
@@ -84,11 +86,7 @@ export async function buildRelease(
     } catch {
       /* The app may have been removed. */
     }
-    await log(
-      new TextEncoder().encode(
-        `${error instanceof Error ? error.message : String(error)}\n`,
-      ),
-    )
+    await logFailure(error instanceof Error ? error.message : String(error))
       .then(() => {
         if (error instanceof Object) loggedErrors.add(error);
       })

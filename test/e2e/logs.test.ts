@@ -35,6 +35,9 @@ scenario(
       const failed = await h.control("logs", "hello", "--release", "v2");
       expect(failed.stdout).toContain("hoist_missing_command");
       expect(failed.stdout).toContain("Docker build:");
+      expect(
+        failed.stdout.split("\n").filter((line) => line.startsWith("error: ")),
+      ).toHaveLength(1);
       const missing = await command([
         ...h.ssh,
         h.remote,

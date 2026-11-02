@@ -7,7 +7,7 @@ import {
   removeReleaseImages,
   reserveRelease,
 } from "../core/build";
-import { buildLogDecoder } from "../core/build-logs";
+import { buildLogDecoder, releaseLogSink } from "../core/build-logs";
 import { cutover, type HealthCheck } from "../core/cutover";
 import { removeReleaseLogs } from "../core/logs";
 import { prune } from "../core/retention";
@@ -101,10 +101,12 @@ async function receiveLocked(
         );
         const logFile = await open(path, "a", 0o600);
         file = logFile;
-        const decoded = buildLogDecoder(async (chunk) => {
-          await logFile.writeFile(chunk);
-          await Bun.write(Bun.stderr, chunk).catch(() => {});
-        });
+        const decoded = buildLogDecoder(
+          releaseLogSink(
+            (chunk) => logFile.writeFile(chunk),
+            (chunk) => Bun.write(Bun.stderr, chunk),
+          ),
+        );
         try {
           await buildRelease(
             store,
@@ -124,6 +126,14 @@ async function receiveLocked(
                 throw new Error(
                   `branch ${branch} moved during build; push again`,
                 );
+            },
+            async (message) => {
+              await decoded.flush();
+              await decoded.write(
+                new TextEncoder().encode(
+                  `${JSON.stringify({ error: message.replace(/[\r\n]+/g, " ") })}\n`,
+                ),
+              );
             },
           );
         } finally {
@@ -158,6 +168,10 @@ async function receiveLocked(
         root,
       );
       const logFile = await open(path, "a", 0o600);
+      const log = releaseLogSink(
+        (chunk) => logFile.writeFile(chunk),
+        (chunk) => Bun.write(Bun.stderr, chunk),
+      );
       try {
         await cutover(
           store,
@@ -170,8 +184,7 @@ async function receiveLocked(
           edge.health,
           async (message) => {
             const chunk = new TextEncoder().encode(`${message}\n`);
-            await logFile.writeFile(chunk);
-            await Bun.write(Bun.stderr, chunk).catch(() => {});
+            await log(chunk);
           },
         );
         await prune(

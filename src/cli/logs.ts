@@ -48,6 +48,36 @@ export function parseLogs(args: string[], app?: App) {
   return options;
 }
 
+// Race both file reads and writes so a blocked consumer cannot prevent cancellation.
+export async function savedLogs(
+  stream: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  write: (chunk: Uint8Array) => Promise<unknown>,
+): Promise<number> {
+  const reader = stream.getReader();
+  const stopped = Symbol("saved log interrupted");
+  let stop: () => void = () => {};
+  const aborted = new Promise<typeof stopped>((resolve) => {
+    stop = () => resolve(stopped);
+  });
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    if (signal.aborted) stop();
+    while (!signal.aborted) {
+      const result = await Promise.race([reader.read(), aborted]);
+      if (result === stopped || signal.aborted) break;
+      if (result.done) return 0;
+      if ((await Promise.race([write(result.value), aborted])) === stopped)
+        break;
+    }
+    return signal.reason === 143 ? 143 : 130;
+  } finally {
+    signal.removeEventListener("abort", stop);
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
 export async function logsCommand(
   root: string,
   store: Store,
@@ -56,9 +86,10 @@ export async function logsCommand(
   const args = command.slice(1);
   const options = parseLogs(args);
   const controller = new AbortController();
-  const abort = () => controller.abort();
-  process.on("SIGINT", abort);
-  process.on("SIGTERM", abort);
+  const interrupt = () => controller.abort(130);
+  const terminate = () => controller.abort(143);
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", terminate);
   try {
     Object.assign(options, parseLogs(args, knownApp(store, options.app)));
     if (options.release) {
@@ -74,8 +105,9 @@ export async function logsCommand(
         throw new Error(
           `No log file for ${options.app} branch ${options.branch} release ${options.release}.`,
         );
-      for await (const chunk of file.stream())
-        await Bun.write(Bun.stdout, chunk);
+      return await savedLogs(file.stream(), controller.signal, (chunk) =>
+        Bun.write(Bun.stdout, chunk),
+      );
     } else {
       return await liveLogs(
         store,
@@ -87,9 +119,8 @@ export async function logsCommand(
         },
       );
     }
-    return 0;
   } finally {
-    process.off("SIGINT", abort);
-    process.off("SIGTERM", abort);
+    process.off("SIGINT", interrupt);
+    process.off("SIGTERM", terminate);
   }
 }

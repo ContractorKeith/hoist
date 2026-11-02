@@ -170,7 +170,10 @@ container ID reattaches automatically and continues following the same release.
 
 `--release vN` reads the complete build and cutover log at
 `$HOIST_DIR/releases/<app>/<branch-slug>/vN/build.log`, including failed pushes.
-Build records are decoded to plain text before saving and streaming to the pusher.
+Build records are decoded to plain text before saving. The pusher-facing copy escapes
+NUL bytes as `\0` because Git sideband truncates at NUL. Saved files retain the bytes;
+`logs` passes NUL bytes through unchanged. Interrupting saved-file output exits 130
+for SIGINT or 143 for SIGTERM, including when stdout is blocked.
 It cannot be combined with `-f` or `-n`. The branch defaults to `main`.
 
 ## Development

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { FakeDocker } from "../../src/adapters/fakes/docker";
-import { buildLogDecoder } from "../../src/core/build-logs";
+import { buildLogDecoder, releaseLogSink } from "../../src/core/build-logs";
 
 test("fake Docker build chunks become plain text, preserving incomplete and non-JSON lines", async () => {
   const docker = new FakeDocker();
@@ -56,4 +56,39 @@ test("decoder enforces the 1 MiB line cap across chunk boundaries", async () => 
   );
   await decoder.flush();
   expect(chunks).toEqual([]);
+});
+
+test("decoder sink preserves NUL in the file and escapes only the pusher copy", async () => {
+  const file: Uint8Array[] = [],
+    stderr: Uint8Array[] = [];
+  const decoded = buildLogDecoder(
+    releaseLogSink(
+      async (chunk) => {
+        file.push(chunk);
+      },
+      async (chunk) => {
+        stderr.push(chunk);
+      },
+    ),
+  );
+  await decoded.write(
+    new TextEncoder().encode('{"stream":"before\\u0000after\\n"}\n'),
+  );
+  await decoded.write(new Uint8Array([255, 0, 65, 10]));
+  await decoded.flush();
+  expect([...Buffer.concat(file)]).toEqual([
+    ...Buffer.from("before\0after\n"),
+    255,
+    0,
+    65,
+    10,
+  ]);
+  expect([...Buffer.concat(stderr)]).toEqual([
+    ...Buffer.from("before\\0after\n"),
+    255,
+    92,
+    48,
+    65,
+    10,
+  ]);
 });
