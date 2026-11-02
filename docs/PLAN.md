@@ -208,12 +208,17 @@ M7 last.
 
 On a fresh Ubuntu 24.04 VM with a public IP and a wildcard DNS record:
 
-1. `curl -fsSL .../install.sh | sh` finishes, `hoist doctor` is clean, `hoist.<domain>` serves the
-   login page over a Let's Encrypt certificate.
+1. `curl -fLO https://github.com/ContractorKeith/hoist/releases/download/v0.1.0/install.sh`,
+   inspect the downloaded script, then `sudo sh install.sh --key ~/.ssh/id_ed25519.pub`.
+   Installation finishes, `hoist doctor` is clean, and `hoist.<domain>` serves the login
+   page over a Let's Encrypt certificate. The script needs a TTY for prompts or explicit
+   domain/email environment variables for automation.
 2. `apps:create`, push, HTTPS response from `<app>.<domain>` within 2 minutes for the fixture app.
 3. Second push: a `while true; do curl; done` loop during cutover logs zero non-200 responses.
 4. `config:set`, push, `rollback`: the app reports the old config value.
-5. Push a branch: preview serves. Delete the branch: preview is gone within 10 seconds.
+5. Push a branch: preview serves. Delete the branch: preview is gone within 10 seconds
+   in the manual measurement on an idle VM. E2e asserts 20 seconds on the shared Docker
+   daemon and logs the observed teardown milliseconds; the measurement is unchanged.
 6. Dashboard rollback moves traffic; `releases` shows the new row.
 7. `apps:destroy` leaves no container, image, route, repo or row behind (`hoist doctor` confirms).
 8. Reboot the server: every live release is back without intervention.

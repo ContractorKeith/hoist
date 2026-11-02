@@ -26,14 +26,18 @@ if (!process.argv.includes("--write") && !process.argv.includes("--check")) {
     "HOIST UNIT",
     unit,
   );
-  const client = `${JSON.stringify(verbs, null, 2)}\n`;
+  const publicVerbs = verbs.filter(
+    (verb) =>
+      !["serve", "ssh-dispatch", "git-hook"].includes(verb.split(" ")[0] ?? ""),
+  );
+  const client = `${JSON.stringify(publicVerbs, null, 2)}\n`;
   const readme = await Bun.file("README.md").text();
   if (
     !readme.includes("<!-- BEGIN VERBS -->") ||
     !readme.includes("<!-- END VERBS -->")
   )
     throw new Error("Missing README verb block");
-  const reference = `<!-- BEGIN VERBS -->\n\`\`\`text\n${verbs.map((v) => `hoist ${v}`).join("\n")}\n\`\`\`\n<!-- END VERBS -->`;
+  const reference = `<!-- BEGIN VERBS -->\n\`\`\`text\n${publicVerbs.map((v) => `hoist ${v}`).join("\n")}\n\`\`\`\n<!-- END VERBS -->`;
   const docs = readme.replace(
     /<!-- BEGIN VERBS -->[\s\S]*?<!-- END VERBS -->/,
     reference,

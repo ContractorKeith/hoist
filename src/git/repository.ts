@@ -2,11 +2,12 @@ import {
   chmod,
   lstat,
   mkdtemp,
+  open,
   readdir,
   readFile,
   realpath,
+  rename,
   rm,
-  writeFile,
 } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { appName, branchSlug } from "../core/validation";
@@ -63,16 +64,36 @@ export async function rewriteHooks(
   appName(name);
   const changes: string[] = [];
   for (const hook of ["pre-receive", "post-receive"]) {
-    const path = privatePath(
-      join(root, "repos", `${name}.git`, "hooks", hook),
-      false,
+    const directory = privatePath(
+      join(root, "repos", `${name}.git`, "hooks"),
+      true,
       false,
       root,
     );
+    const path = join(directory, hook);
+    const entry = await lstat(path).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (entry && !entry.isFile())
+      throw new Error(`${path} must be a regular file`);
     const expected = `#!/bin/sh\nexec ${executableCommand()} git-hook ${hook} ${shellQuote(name)}\n`;
-    const previous = await readFile(path, "utf8");
+    const previous = entry ? await readFile(path, "utf8") : "";
     if (previous !== expected) {
-      await writeFile(path, expected, { mode: 0o700 });
+      const next = join(directory, `.${hook}.next`);
+      const file = await open(next, "wx", 0o700);
+      try {
+        try {
+          await file.writeFile(expected);
+        } finally {
+          // Close the writable descriptor before publishing so Git can exec immediately.
+          await file.close();
+        }
+        await rename(next, path);
+      } catch (error) {
+        await rm(next, { force: true });
+        throw error;
+      }
       changes.push(
         `${name} ${hook}: replaced ${previous.trim().replace(/\s+/g, " ")} with ${expected.trim().replace(/\s+/g, " ")}`,
       );
@@ -85,8 +106,16 @@ export async function repairRepoHooks(root: string): Promise<string[]> {
   const repos = privatePath(join(root, "repos"), true, false, root);
   const changes: string[] = [];
   for (const entry of await readdir(repos)) {
-    if (entry.endsWith(".git"))
-      changes.push(...(await rewriteHooks(root, entry.slice(0, -4))));
+    try {
+      if (!entry.endsWith(".git")) throw new Error("not a bare repository");
+      appName(entry.slice(0, -4));
+    } catch (error) {
+      changes.push(
+        `skipped ${entry}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
+    changes.push(...(await rewriteHooks(root, entry.slice(0, -4))));
   }
   return changes;
 }

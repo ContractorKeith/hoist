@@ -56,6 +56,7 @@ const commands: Record<
     args: string[],
   ) => number | void | Promise<number> | Promise<void>
 > = {
+  // Doctor is here only for the ssh-dispatch allowlist; direct calls run above store setup.
   doctor: (_root, _store, args) => doctor(args),
   "config:set": (_root, store, args) => configCommand(store, args),
   "config:unset": (_root, store, args) => configCommand(store, args),

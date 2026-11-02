@@ -24,15 +24,15 @@ its official repository when missing and verifies SHA-256 for hoist and Caddy.
 It creates `/etc/hoist/hoist.env` (0600, owned by hoist), the `hoist` system user
 in the Docker group, `/var/lib/hoist` (0700), and `hoist.service`.
 
-Add the printed forced-command key line to `/var/lib/hoist/.ssh/authorized_keys`:
-create `.ssh` with mode 0700, the file with mode 0600, and own both as `hoist`.
-The key can push and run public CLI verbs; forwarding, PTY, fetching and cloning
-are disabled. The forced command loads the same environment as systemd.
-`HOIST_OWNER_KEY` also accepts one public key. SSH must already be available.
+With `--key` (or `HOIST_OWNER_KEY`), the installer adds the forced-command key
+idempotently to `/var/lib/hoist/.ssh/authorized_keys`, owned by hoist with modes
+0700 for `.ssh` and 0600 for the file. Without a key, it prints a template to add
+manually. The key can push and run public CLI verbs; forwarding, PTY, fetching
+and cloning are disabled. SSH must already be available.
 
-For a non-interactive install without a password, doctor reports the missing
-password and exits 1. Set it using `ssh hoist@server hoist dashboard:set-password`
-with one password line on stdin, then run doctor again.
+A non-interactive install without a password succeeds and reports the missing
+password through doctor. Set it by piping one password line into
+`ssh hoist@server hoist dashboard:set-password`, then run doctor again.
 
 ## First push
 
@@ -100,10 +100,13 @@ The dashboard binds loopback port 8700; Caddy provides HTTPS.
 Re-run the installer with `HOIST_VERSION=v0.1.0` (or another published tag). It
 replaces the binary and service, preserves the existing environment and app data,
 and runs doctor, which rewrites both generated Git hooks to the current executable.
-Upgrades keep the existing password unless `HOIST_OWNER_PASSWORD` is supplied.
+Upgrades keep the existing password; `HOIST_OWNER_PASSWORD` initializes only a
+new install. Use `dashboard:set-password` to change it later.
 
-Run `hoist doctor --json` to inspect dependencies, service health, hook repairs
-and orphan containers, images or routes. Orphans are reported for manual cleanup.
+Run `hoist doctor --json` to inspect dependencies, service health and orphan
+resources. Doctor migrates the database, generates `secret.key` when nothing is
+encrypted yet, and rewrites stale hooks. Everything else is read-only; orphan
+containers, images and routes are reported for manual cleanup.
 For a container without systemd, `HOIST_DOCTOR_NO_SERVICE=1` downgrades unavailable
 service/admin checks to warnings; other failures still exit 1.
 
@@ -115,8 +118,7 @@ and its other resources remain installed.
 
 ## CLI reference
 
-Generated from the server verb table. `serve` and `ssh-dispatch` are internal
-entry points and cannot be invoked through the SSH control command.
+Generated from the public server verb table. Internal entry points are omitted.
 
 <!-- BEGIN VERBS -->
 ```text
@@ -137,8 +139,6 @@ hoist previews:destroy <name> <branch>
 hoist dashboard:set-password
 hoist doctor [--json]
 hoist version
-hoist ssh-dispatch
-hoist serve
 ```
 <!-- END VERBS -->
 

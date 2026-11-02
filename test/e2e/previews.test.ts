@@ -105,7 +105,7 @@ scenario(
         assertPreviewGone(h, app, "feature-x", "feature-x", images),
       ]);
       console.log(
-        `Preview deletion: push completed in ${pushMs} ms; cleanup completed in ${teardownMs} ms from delete push.`,
+        `Preview deletion: observed teardown ${teardownMs} ms from delete push; push completed in ${pushMs} ms.`,
       );
       const xyImages = h.store
         .releases(app.id)

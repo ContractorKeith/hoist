@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { constants } from "node:os";
 
 const verbs = JSON.parse(
   readFileSync(new URL("../verbs.json", import.meta.url), "utf8"),
@@ -34,6 +35,6 @@ if (args.length === 1 && args[0] === "--help") {
     process.exitCode = 1;
   });
   child.on("exit", (code, signal) => {
-    process.exitCode = code ?? (signal === "SIGINT" ? 130 : 1);
+    process.exitCode = code ?? (signal ? 128 + constants.signals[signal] : 1);
   });
 }

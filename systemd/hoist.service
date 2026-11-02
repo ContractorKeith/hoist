@@ -18,6 +18,11 @@ Restart=on-failure
 RestartSec=2
 TimeoutStopSec=45
 UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/hoist
 
 [Install]
 WantedBy=multi-user.target

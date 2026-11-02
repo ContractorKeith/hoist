@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { command, ok } from "./e2e/ssh";
+import { command, ok } from "../e2e/ssh";
 
 test("Node client preserves exact ssh argv, host precedence and exit code", async () => {
   const root = await mkdtemp(join(tmpdir(), "hoist-client-"));
@@ -85,4 +85,33 @@ test("Node client preserves exact ssh argv, host precedence and exit code", asyn
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+for (const [signal, code] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+  ["SIGHUP", 129],
+] as const) {
+  test(`Node client maps ssh ${signal} to exit ${code}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "client-signal-"));
+    try {
+      await Bun.write(
+        join(root, "ssh"),
+        `#!/bin/sh\nkill -${signal.slice(3)} "$$"\n`,
+      );
+      await chmod(join(root, "ssh"), 0o700);
+      const result = await command(
+        ["node", resolve("cli/bin/hoist.js"), "--host", "test", "apps:list"],
+        { env: { ...process.env, PATH: `${root}:${process.env.PATH}` } },
+      );
+      expect(result.code).toBe(code);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("client help exposes only verbs available through SSH", async () => {
+  const help = await ok(["node", resolve("cli/bin/hoist.js"), "--help"]);
+  expect(help.stdout).not.toMatch(/\bserve\b|\bssh-dispatch\b|\bgit-hook\b/);
 });

@@ -15,7 +15,5 @@
   "previews:destroy <name> <branch>",
   "dashboard:set-password",
   "doctor [--json]",
-  "version",
-  "ssh-dispatch",
-  "serve"
+  "version"
 ]

@@ -3,11 +3,19 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Docker } from "../../src/adapters/docker";
+import { DashboardStore } from "../../src/store/dashboard";
 import { SqliteStore } from "../../src/store/sqlite";
+import {
+  beforeInstall,
+  checkInstalledFiles,
+  downloadGuards,
+  installerCommands,
+  signalCleanup,
+} from "./install-guards";
 import { command, ok } from "./ssh";
 
 test.skipIf(process.env.HOIST_E2E !== "1")(
-  "fresh Ubuntu installer, doctor and upgrade preserve app data",
+  "fresh Ubuntu installer validates guards, installs the owner key and preserves upgrades",
   async () => {
     try {
       await new Docker().ping();
@@ -35,39 +43,45 @@ test.skipIf(process.env.HOIST_E2E !== "1")(
       ]);
       await ok(["docker", "cp", resolve("dist/hoist"), `${name}:/local-hoist`]);
       await ok(["docker", "cp", resolve("install.sh"), `${name}:/install.sh`]);
+      await ok([
+        "docker",
+        "cp",
+        resolve("test/fixtures/installer-owner.pub"),
+        `${name}:/owner.pub`,
+      ]);
+      await beforeInstall(name);
       const install = [
         "docker",
         "exec",
         "-e",
         "HOIST_LOCAL_BINARY=/local-hoist",
         "-e",
+        "HOIST_E2E=1",
+        "-e",
         "HOIST_DOMAIN=example.test",
         "-e",
         "HOIST_ACME_EMAIL=owner@example.test",
-        "-e",
-        "HOIST_OWNER_PASSWORD=installer-test-password",
         "-e",
         "HOIST_DOCTOR_NO_SERVICE=1",
         name,
         "sh",
         "/install.sh",
+        "--key",
+        "/owner.pub",
       ];
       const first = await command(install);
       if (first.code) throw new Error(first.output);
       expect(first.output).toContain("Running hoist doctor.");
       expect(first.code).toBe(0);
-      const inside = (...args: string[]) =>
-        ok(["docker", "exec", name, ...args]);
-      expect(
-        (await inside("cat", "/etc/systemd/system/hoist.service")).stdout,
-      ).toContain("AmbientCapabilities=CAP_NET_BIND_SERVICE");
-      expect(
-        (
-          await inside("stat", "-c", "%a", "/etc/hoist/hoist.env")
-        ).stdout.trim(),
-      ).toBe("600");
-      expect((await inside("getent", "passwd", "hoist")).stdout).toContain(
-        "/var/lib/hoist:/bin/sh",
+      const { inside, invoke } = installerCommands(name);
+      expect(first.output).toContain(
+        "Fix the items above and rerun hoist doctor.",
+      );
+      const authorized = await checkInstalledFiles(name, first.stdout);
+      await inside(
+        "sh",
+        "-c",
+        "printf 'installer-test-password\\n' | runuser -u hoist -- /usr/local/bin/hoist dashboard:set-password",
       );
       const control = (...args: string[]) =>
         inside(
@@ -106,6 +120,7 @@ test.skipIf(process.env.HOIST_E2E !== "1")(
         join(scratch, "hoist.db"),
       ]);
       const fixture = new SqliteStore(scratch);
+      const password = new DashboardStore(fixture.db).password();
       const app = fixture.app("install-test");
       if (!app) throw new Error("Missing installed app");
       fixture.insertRelease({
@@ -128,7 +143,29 @@ test.skipIf(process.env.HOIST_E2E !== "1")(
       const releases = (await control("releases", "install-test", "--json"))
         .stdout;
       const before = (await inside("cat", "/etc/hoist/hoist.env")).stdout;
-      expect((await ok(install)).code).toBe(0);
+      const upgrade = await invoke([
+        "HOIST_LOCAL_BINARY=/local-hoist",
+        "HOIST_E2E=1",
+        "HOIST_DOCTOR_NO_SERVICE=1",
+        "HOIST_OWNER_PASSWORD=must-not-reset",
+      ]);
+      if (upgrade.code) throw new Error(upgrade.output);
+      expect(upgrade.code).toBe(0);
+      expect(
+        (await inside("cat", "/var/lib/hoist/.ssh/authorized_keys")).stdout,
+      ).toBe(authorized);
+      await ok([
+        "docker",
+        "cp",
+        `${name}:/var/lib/hoist/hoist.db`,
+        join(scratch, "hoist.db"),
+      ]);
+      const upgraded = new SqliteStore(scratch);
+      try {
+        expect(new DashboardStore(upgraded.db).password()).toBe(password);
+      } finally {
+        upgraded.close();
+      }
       expect((await inside("cat", "/etc/hoist/hoist.env")).stdout).toBe(before);
       expect(
         (await control("config:list", "install-test", "--reveal", "--json"))
@@ -138,6 +175,12 @@ test.skipIf(process.env.HOIST_E2E !== "1")(
       expect((await control("releases", "install-test", "--json")).stdout).toBe(
         releases,
       );
+      const arch = process.arch === "x64" ? "x64" : "arm64";
+      const digest = new Bun.CryptoHasher("sha256")
+        .update(await Bun.file("dist/hoist").arrayBuffer())
+        .digest("hex");
+      await downloadGuards(name, arch, digest);
+      await signalCleanup(name);
       await control("apps:destroy", "install-test", "--force");
     } finally {
       await command(["docker", "rm", "-f", name]);

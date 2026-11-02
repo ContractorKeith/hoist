@@ -2,9 +2,9 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeDocker } from "../src/adapters/fakes/docker";
-import { doctorChecks, runChecks } from "../src/cli/doctor";
-import { SqliteStore } from "../src/store/sqlite";
+import { FakeDocker } from "../../src/adapters/fakes/docker";
+import { doctorChecks, runChecks } from "../../src/cli/doctor";
+import { SqliteStore } from "../../src/store/sqlite";
 
 describe("doctor failures", () => {
   test("dependency, TLS, port, lease, image and route checks fail on broken fakes", async () => {
@@ -84,4 +84,29 @@ describe("doctor failures", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+});
+
+test("missing Caddy binary reports the pinned installer fix instead of ENOENT", async () => {
+  const root = await mkdtemp(join(tmpdir(), "missing-caddy-"));
+  const store = new SqliteStore(root);
+  const file = spyOn(Bun, "file").mockImplementation(
+    () =>
+      ({
+        arrayBuffer: async () => {
+          throw Object.assign(new Error("raw ENOENT"), { code: "ENOENT" });
+        },
+      }) as unknown as ReturnType<typeof Bun.file>,
+  );
+  try {
+    const checks = doctorChecks(root, store, new FakeDocker());
+    const [result] = await runChecks({
+      "Caddy binary": checks["Caddy binary"] as () => unknown,
+    });
+    expect(result?.status).toBe("error");
+    expect(result?.message).toBe("Re-run install.sh to restore pinned Caddy.");
+  } finally {
+    file.mockRestore();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeDocker } from "../src/adapters/fakes/docker";
-import { doctorChecks, runChecks } from "../src/cli/doctor";
-import { createRepo, executableCommand } from "../src/git/repository";
-import { DashboardStore } from "../src/store/dashboard";
-import { SqliteStore } from "../src/store/sqlite";
+import { FakeDocker } from "../../src/adapters/fakes/docker";
+import { doctorChecks, runChecks } from "../../src/cli/doctor";
+import { createRepo, executableCommand } from "../../src/git/repository";
+import { DashboardStore } from "../../src/store/dashboard";
+import { SqliteStore } from "../../src/store/sqlite";
 
 describe("doctor", () => {
   test("every check reports success or a single-line fix and continues after failure", async () => {
