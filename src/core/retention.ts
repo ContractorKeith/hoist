@@ -67,15 +67,27 @@ export async function prune(
         .filter((row) => !row.pruned_at && !ids.has(row.id))
         .map((row) => row.image),
     );
+    const attemptedImages = new Set<string>();
     for (const row of selected) {
       let failure: { path: string; error: unknown } | undefined;
       const path = `releases/${app.name}/${branchSlug(row.branch)}/v${row.number}`;
       try {
-        if (!protectedImages.has(row.image)) {
+        if (
+          !protectedImages.has(row.image) &&
+          !attemptedImages.has(row.image)
+        ) {
+          attemptedImages.add(row.image);
           try {
             await docker.removeImage(row.image);
           } catch (error) {
-            failure = { path: row.image, error };
+            // The Docker adapter includes the HTTP status in its error message.
+            if (
+              !(
+                error instanceof Error &&
+                /^Docker DELETE .*: 404\b/.test(error.message)
+              )
+            )
+              failure = { path: row.image, error };
           }
         }
         // Keep failed logs, but finish their one image-cleanup attempt.
