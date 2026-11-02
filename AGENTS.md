@@ -58,6 +58,8 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - `HOIST_TLS=acme` (default) uses Let's Encrypt with `HOIST_ACME_EMAIL`; `internal` uses the local CA. `HOIST_HTTP_PORT`/`HOIST_HTTPS_PORT` default to 80/443; `HOIST_CADDY_ADMIN_PORT` defaults to 2019 and must match in serve and hooks. Caddy data lives in `HOIST_DIR/caddy`.
 - Containers use the single exposed TCP port (ignore UDP); no TCP exposure uses `PORT` or 8080; several TCP ports require `PORT`. Docker assigns the loopback-only published port.
 - SQLite `locks` leases serialize hook reserve/build/cutover and reconcile; heartbeat every 10 s, reclaim dead PIDs or heartbeats older than 60 s, poll 200 ms for 10 minutes, and abort waits on shutdown. No lock files.
+- Cutover commits the new `live` row and old `stopped` rows after the health check and route write, before retiring old containers.
+- Reconcile runs at boot and after every Caddy restart; restart attempts use bounded waits and retry on errors.
 - Health requires 2xx; redirects are not followed and 3xx fails cutover.
 - Reconcile updates routes per app under its lease, never loads a full snapshot, verifies container app/release labels, and removes non-live candidates as interrupted cutovers. Spawn config dedupes newest release id per host.
 - `apps:destroy` refuses while a build holds the app lease; it does not wait. It removes local resources and rows before routes; unreachable Caddy warns and succeeds because serve rebuilds routes.

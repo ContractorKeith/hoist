@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { command, ok } from "../e2e/ssh";
 
-for (const tag of ["v0.2.0", "v0.1.0-rc", "v0.2.0-rc.1"]) {
+for (const tag of ["v0.2.0", "v0.1.0-rc", "v0.2.0-rc.1", "v0.2.0-beta.1"]) {
   test(`release assembly pins binaries and selects changelog notes for ${tag}`, async () => {
     const root = await mkdtemp(join(tmpdir(), "release-assembly-"));
     try {
@@ -17,7 +17,7 @@ for (const tag of ["v0.2.0", "v0.1.0-rc", "v0.2.0-rc.1"]) {
         ?.replace(/^ {10}/gm, "");
       if (!script) throw new Error("Missing release assembly step");
       await mkdir(join(root, ".tmp"));
-      const version = tag.slice(1).split("-rc")[0];
+      const version = tag.slice(1).split("-")[0];
       await Bun.write(join(root, "package.json"), JSON.stringify({ version }));
       const validation = workflow
         .split("      - name: Validate release tag\n")[1]
@@ -37,6 +37,20 @@ for (const tag of ["v0.2.0", "v0.1.0-rc", "v0.2.0-rc.1"]) {
           })
         ).code,
       ).not.toBe(0);
+      for (const invalid of [
+        "v0.2.0/invalid",
+        "v0.2.0-rc/invalid",
+        "v0.2.0-",
+      ]) {
+        expect(
+          (
+            await command(["sh", "-c", validation], {
+              cwd: root,
+              env: { ...process.env, GITHUB_REF_NAME: invalid },
+            })
+          ).code,
+        ).not.toBe(0);
+      }
       const x64 = join(root, ".tmp/hoist-linux-x64");
       await Bun.write(x64, "#!/bin/sh\nprintf '0.2.0\\n'\n");
       await chmod(x64, 0o700);
@@ -57,6 +71,7 @@ for (const tag of ["v0.2.0", "v0.1.0-rc", "v0.2.0-rc.1"]) {
       );
       const pinned = await Bun.file(join(root, "install.sh")).text();
       expect(pinned).toContain(`HOIST_VERSION=\${HOIST_VERSION:-${tag}}`);
+      expect(pinned).toContain(`# Hoist ${tag}:`);
       expect(pinned).toContain(`HOIST_PINNED_VERSION=${tag}\n`);
       const defaultVersion = (
         await ok(

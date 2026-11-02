@@ -6,10 +6,8 @@ one serving. MIT licensed; one Bun executable, Docker, Git and pinned Caddy.
 
 ## Requirements
 
-One Docker daemon hosts exactly one hoist instance. A second `serve`, a lab beside
-the e2e suite, or the installer container shares that daemon and will delete the
-other instance's containers. Unique app names and ports provide no isolation.
-Stop other instances before running e2e; its daemon lock is mandatory.
+One Docker daemon hosts exactly one hoist instance; a second instance on the
+same daemon deletes the other's containers.
 
 Use a fresh Ubuntu 24.04 or Debian 12 server (x64 or arm64), with ports 22, 80 and
 443 open. Point `*.example.com` and `*.hello.example.com` at its IP; previews need
@@ -75,7 +73,8 @@ hoist apps:set hello retention=10
 ```
 
 SSH command arguments are limited to about 8 KiB and cannot contain control
-characters. For multi-line or long secrets (up to 64 KiB), pass the value on stdin:
+characters. For multi-line or long secrets (up to 64 KiB), pass the value on stdin.
+A single trailing newline (LF or CRLF) is stripped:
 
 ```sh
 hoist config:set hello PEM --stdin < private-key.pem

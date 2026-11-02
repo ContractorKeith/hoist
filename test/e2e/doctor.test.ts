@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { join, resolve } from "node:path";
 import { DashboardStore } from "../../src/store/dashboard";
-import { command, withSSH } from "./ssh";
+import { command, ok, withSSH } from "./ssh";
 
 test.skipIf(process.env.HOIST_E2E !== "1")(
   "doctor repairs hooks and reports an orphan until app destruction",
@@ -50,6 +50,36 @@ test.skipIf(process.env.HOIST_E2E !== "1")(
           checks.find((r: { check: string }) => r.check === "Orphan containers")
             .message,
         ).toContain(orphan);
+        const stale = `hoist/${h.appName}:stale`;
+        try {
+          await ok(["docker", "tag", image, stale]);
+          const imagesCheck = async () =>
+            JSON.parse((await run()).stdout).find(
+              (r: { check: string }) => r.check === "Orphan images",
+            );
+          // A second tag on a retained image is still owned.
+          expect((await imagesCheck()).status).toBe("ok");
+          const live = h.store
+            .releases(app.id)
+            .find((r) => r.status === "live");
+          if (!live?.container_id) throw new Error("Missing live container");
+          // A distinct top-level image carrying the stale tag is untracked.
+          await ok([
+            "docker",
+            "commit",
+            "--change",
+            "LABEL hoist.orphan=true",
+            live.container_id,
+            stale,
+          ]);
+          const orphanImage = await imagesCheck();
+          expect(orphanImage.status).toBe("error");
+          expect(orphanImage.message).toContain(stale);
+          await ok(["docker", "rmi", stale]);
+          expect((await imagesCheck()).status).toBe("ok");
+        } finally {
+          await command(["docker", "rmi", stale]);
+        }
         for (const path of [hook, post])
           expect(await Bun.file(path).text()).toContain(
             `exec '${process.execPath}' '${resolve(import.meta.dir, "../../src/cli/index.ts")}' git-hook`,

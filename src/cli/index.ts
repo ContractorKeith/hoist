@@ -42,8 +42,12 @@ export const verbs = [
   "ssh-dispatch",
   "serve",
 ];
-export const usage = () =>
-  `Usage: hoist <verb>\n${verbs.map((verb) => `  ${verb}`).join("\n")}`;
+export const publicVerbs = verbs.filter(
+  (verb) =>
+    !["serve", "ssh-dispatch", "git-hook"].includes(verb.split(" ")[0] ?? ""),
+);
+export const usage = (entries = verbs) =>
+  `Usage: hoist <verb>\n${entries.map((verb) => `  ${verb}`).join("\n")}`;
 
 // Compare recreation against process start, before delay or lease acquisition.
 const hookStartedAt = performance.timeOrigin;
@@ -92,11 +96,17 @@ export async function run(args: string[]): Promise<number> {
     if (args[0] === "ssh-dispatch" && args.length === 1) {
       const command = parseDispatch(process.env.SSH_ORIGINAL_COMMAND ?? "");
       if (command.kind === "cli") {
+        const [verb] = command.args;
+        if (verb === "--help" && command.args.length === 1) {
+          console.log(usage(publicVerbs));
+          return 0;
+        }
         if (
-          !Object.hasOwn(commands, command.args[0] ?? "") &&
-          !["--help", "version"].includes(command.args[0] ?? "")
+          (!Object.hasOwn(commands, verb ?? "") && verb !== "version") ||
+          (["--help", "version"].includes(verb ?? "") &&
+            command.args.length !== 1)
         )
-          throw new Error(usage()); // Internal entry points are never exposed over SSH.
+          throw new Error(usage(publicVerbs));
         return run(command.args);
       }
       const root = dataRoot();

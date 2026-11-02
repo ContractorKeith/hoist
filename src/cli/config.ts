@@ -26,7 +26,7 @@ export function parseValues(args: string[]): [string, string][] {
 }
 export async function configValues(
   args: string[],
-  input: ReadableStream<Uint8Array>,
+  input?: ReadableStream<Uint8Array>,
 ): Promise<[string, string][]> {
   if (!args.includes("--stdin")) return parseValues(args);
   if (args.length !== 2 || args[1] !== "--stdin")
@@ -34,12 +34,14 @@ export async function configValues(
   const key = configKey(args[0] ?? "");
   const chunks: Uint8Array[] = [];
   let size = 0;
-  for await (const chunk of input) {
+  for await (const chunk of input ?? Bun.stdin.stream()) {
     size += chunk.length;
     if (size > 65536) throw new Error("Config stdin must be at most 64 KiB.");
     chunks.push(chunk);
   }
-  const value = Buffer.concat(chunks).toString("utf8").replace(/\n$/, "");
+  const value = Buffer.concat(chunks)
+    .toString("utf8")
+    .replace(/\r?\n$/, "");
   if (!value) throw new Error("Config stdin must not be empty.");
   return parseValues([`${key}=${value}`]);
 }
@@ -48,7 +50,7 @@ export async function configCommand(
   store: Store,
   args: string[],
   print = console.log,
-  input = Bun.stdin.stream(),
+  input?: ReadableStream<Uint8Array>,
 ): Promise<void> {
   const [verb, name, ...rest] = args;
   const app = knownApp(store, appName(name ?? ""));

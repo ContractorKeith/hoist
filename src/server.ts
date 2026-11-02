@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { SqliteAppLocks } from "./adapters/app-lock";
+import { SqliteAppLocks, wait } from "./adapters/app-lock";
 import { Caddy } from "./adapters/caddy";
 import { ensureCaddy } from "./adapters/caddy-binary";
 import { Docker } from "./adapters/docker";
@@ -15,6 +15,7 @@ import {
 } from "./core/caddy-config";
 import { previewTTL, sweepPreviews } from "./core/previews";
 import { reconcile } from "./core/reconcile";
+import { retryReconcile } from "./core/reconcile-retry";
 import { dataRoot, privatePath } from "./data";
 import { finishSupervisor, scheduleSweep } from "./preview-timer";
 import { SqliteStore } from "./store/sqlite";
@@ -68,6 +69,8 @@ export async function serve(): Promise<void> {
   let stopping = false;
   let stoppingChild: Promise<void> | undefined;
   let child: ReturnType<typeof Bun.spawn> | undefined;
+  let restartRepair: Promise<void> | undefined;
+  let restartAbort: AbortController | undefined;
   const sweeper = scheduleSweep(() =>
     sweepPreviews(
       root,
@@ -164,25 +167,38 @@ export async function serve(): Promise<void> {
         await Bun.sleep(50);
       }
       if (ready && !stopping) {
-        await reconcile(
-          store,
-          docker,
-          caddy,
-          locks,
-          checkHealth,
-          startedAt,
-          console.error,
-          shutdown.signal,
-          dashboard,
-        );
+        const repair = (signal: AbortSignal) =>
+          reconcile(
+            store,
+            docker,
+            caddy,
+            locks,
+            checkHealth,
+            startedAt,
+            console.error,
+            signal,
+            dashboard,
+          );
         if (boot) {
+          await repair(shutdown.signal);
           boot = false;
           sweeper.start();
+        } else {
+          restartAbort = new AbortController();
+          restartRepair = retryReconcile(
+            repair,
+            AbortSignal.any([shutdown.signal, restartAbort.signal]),
+            console.error,
+            wait,
+          );
         }
         if (!stopping) console.error("hoist serve ready");
       }
       if (!ready && child.exitCode === null) await stopChild(child);
       const code = await child.exited;
+      restartAbort?.abort(new Error("Caddy exited"));
+      await restartRepair;
+      restartRepair = undefined;
       lease.setChild(null);
       await stderrDone;
       if (stoppingChild) await stoppingChild;
@@ -214,6 +230,7 @@ export async function serve(): Promise<void> {
   } finally {
     stopping = true;
     shutdown.abort();
+    await restartRepair;
     await finishSupervisor(
       () => sweeper.cancel(),
       async () => {

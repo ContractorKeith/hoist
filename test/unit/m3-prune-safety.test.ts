@@ -87,10 +87,12 @@ for (const missing of [false, true]) {
     const live = reserveRelease(store, app, "main", "c".repeat(40));
     live.status = "live";
     let calls = 0;
-    docker.removeImage = async () => {
+    docker.removeImage = async (image) => {
       calls++;
       if (missing || calls > 1)
-        throw new Error("Docker DELETE /images/hoist/hello:tag: 404 missing");
+        throw new Error(
+          `Docker DELETE /images/${encodeURIComponent(image)}: 404 missing`,
+        );
     };
     const warnings: string[] = [];
     await prune(
@@ -109,3 +111,32 @@ for (const missing of [false, true]) {
     expect(live.pruned_at).toBeUndefined();
   });
 }
+
+test("retention does not swallow a 404 mentioned inside a different Docker error", async () => {
+  const store = new FakeStore(),
+    docker = new FakeDocker();
+  const app = store.createApp("hello", "hello.test", "/");
+  const row = reserveRelease(store, app, "main", "a".repeat(40));
+  row.status = "failed";
+  const message =
+    "Docker DELETE /images/hoist%2Fhello%3Atag: 500 upstream: 404 missing";
+  docker.removeImage = async () => {
+    throw new Error(message);
+  };
+  const lines: string[] = [],
+    stderr = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await prune(
+      store,
+      docker,
+      app,
+      async () => {},
+      async (line) => {
+        lines.push(line);
+      },
+    );
+    expect(lines[0]).toContain(message);
+  } finally {
+    stderr.mockRestore();
+  }
+});

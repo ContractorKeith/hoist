@@ -146,8 +146,9 @@ export async function reconcile(
         signal,
       );
     } catch (error) {
+      if (!signal?.aborted || signal.reason?.name === "TimeoutError")
+        record(candidate.name, error);
       if (signal?.aborted) break;
-      record(candidate.name, error);
     }
   }
   if (signal?.aborted) return errors;

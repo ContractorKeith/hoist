@@ -1,5 +1,5 @@
 import { caddyRelease } from "../src/adapters/caddy-binary";
-import { verbs } from "../src/cli/index";
+import { publicVerbs } from "../src/cli/index";
 
 const pins = [
   `CADDY_VERSION=${caddyRelease.version}`,
@@ -25,10 +25,6 @@ if (!process.argv.includes("--write") && !process.argv.includes("--check")) {
     replace(current, "CADDY PINS", pins),
     "HOIST UNIT",
     unit,
-  );
-  const publicVerbs = verbs.filter(
-    (verb) =>
-      !["serve", "ssh-dispatch", "git-hook"].includes(verb.split(" ")[0] ?? ""),
   );
   const client = `${JSON.stringify(publicVerbs, null, 2)}\n`;
   const readme = await Bun.file("README.md").text();

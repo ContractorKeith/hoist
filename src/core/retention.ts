@@ -84,7 +84,7 @@ export async function prune(
             if (
               !(
                 error instanceof Error &&
-                /^Docker DELETE .*: 404\b/.test(error.message)
+                /^Docker DELETE \/images\/[^:]*: 404\b/.test(error.message)
               )
             )
               failure = { path: row.image, error };

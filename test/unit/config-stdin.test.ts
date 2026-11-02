@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { FakeStore } from "../../src/adapters/fakes/store";
 import { configCommand, configValues } from "../../src/cli/config";
 import { decryptConfig } from "../../src/core/secrets";
@@ -40,4 +40,25 @@ test("SSH control characters and oversized commands explain stdin", () => {
     "a\tb",
   ])
     expect(() => commandArgs(value)).toThrow("use config:set KEY --stdin");
+});
+
+test("config stdin strips one CRLF and ordinary config commands never open stdin", async () => {
+  expect(await configValues(["KEY", "--stdin"], input("line\r\n"))).toEqual([
+    ["KEY", "line"],
+  ]);
+  expect(await configValues(["KEY", "--stdin"], input("line\r\n\r\n"))).toEqual(
+    [["KEY", "line\r\n"]],
+  );
+  const stream = spyOn(Bun.stdin, "stream").mockImplementation(() => {
+    throw new Error("stdin must stay closed");
+  });
+  try {
+    const store = new FakeStore();
+    store.createApp("hello", "hello.test", "/");
+    await configCommand(store, ["config:set", "hello", "KEY=value"], () => {});
+    await configCommand(store, ["config:list", "hello"], () => {});
+    expect(stream).not.toHaveBeenCalled();
+  } finally {
+    stream.mockRestore();
+  }
 });

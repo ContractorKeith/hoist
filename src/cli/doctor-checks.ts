@@ -161,7 +161,7 @@ export function doctorChecks(
         [{ label: ["hoist.app"] }, { reference: ["hoist/*"] }].map(
           async (filters) => {
             const response = await request(
-              `http://localhost/v1.47/images/json?all=true&filters=${encodeURIComponent(JSON.stringify(filters))}`,
+              `http://localhost/v1.47/images/json?filters=${encodeURIComponent(JSON.stringify(filters))}`,
               {
                 unix: (
                   process.env.DOCKER_HOST ?? "/var/run/docker.sock"
@@ -185,14 +185,16 @@ export function doctorChecks(
         ...new Map(groups.flat().map((image) => [image.Id, image])).values(),
       ];
       const tags = new Set(releases().map((r) => r.image));
-      const orphans = images.filter((image) =>
-        image.RepoTags?.some(
-          (tag) => tag.startsWith("hoist/") && !tags.has(tag),
-        ),
-      );
+      const orphans = images
+        .filter((image) => !image.RepoTags?.some((tag) => tags.has(tag)))
+        .flatMap((image) => {
+          const stale =
+            image.RepoTags?.filter((tag) => tag !== "<none>:<none>") ?? [];
+          return stale.length ? stale : [image.Id];
+        });
       requireCheck(
         !orphans.length,
-        `Remove orphan images: ${orphans.map((i) => i.Id).join(", ")}.`,
+        `Remove orphan images: ${orphans.join(", ")}.`,
       );
     },
     "Orphan routes": async () => {
