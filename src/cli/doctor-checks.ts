@@ -5,13 +5,13 @@ import { isAbsolute, join } from "node:path";
 import { caddyRelease } from "../adapters/caddy-binary";
 import { Docker } from "../adapters/docker";
 import type { DockerClient } from "../adapters/interfaces";
-import { port } from "../adapters/validation";
+import { hostName, port } from "../adapters/validation";
 import { dashboardHost } from "../core/caddy-config";
 import { releaseHost } from "../core/previews";
 import { repairRepoHooks } from "../git/repository";
 import { caddySettings } from "../server";
 import { DashboardStore } from "../store/dashboard";
-import type { SqliteStore } from "../store/sqlite";
+import { databaseError, type SqliteStore } from "../store/sqlite";
 
 export class ServiceUnavailable extends Error {}
 export type Check = () => unknown | Promise<unknown>;
@@ -93,15 +93,7 @@ export function doctorChecks(
       try {
         store().migrate();
       } catch (error) {
-        if (
-          error instanceof Error &&
-          (error.message.includes("file is not a database") ||
-            (error as { code?: string }).code === "SQLITE_NOTADB")
-        )
-          throw new Error(
-            `${join(root, "hoist.db")} is not a SQLite database; restore it from your backup.`,
-          );
-        throw error;
+        throw databaseError(root, error);
       }
     },
     "Secret key": async () => {
@@ -120,6 +112,13 @@ export function doctorChecks(
       await (await admin("/config/")).body?.cancel();
     },
     "TLS and ports": () => {
+      try {
+        hostName(dashboardHost());
+      } catch {
+        throw new Error(
+          "Set HOIST_DOMAIN and HOIST_DASHBOARD_HOST to valid lowercase DNS names.",
+        );
+      }
       const settings = caddySettings(root);
       const dashboard = Number(process.env.HOIST_DASHBOARD_PORT ?? 8700);
       port(dashboard);
@@ -162,7 +161,7 @@ export function doctorChecks(
         [{ label: ["hoist.app"] }, { reference: ["hoist/*"] }].map(
           async (filters) => {
             const response = await request(
-              `http://localhost/v1.47/images/json?all=true&filters=${encodeURIComponent(JSON.stringify(filters))}`,
+              `http://localhost/v1.47/images/json?filters=${encodeURIComponent(JSON.stringify(filters))}`,
               {
                 unix: (
                   process.env.DOCKER_HOST ?? "/var/run/docker.sock"
@@ -187,15 +186,15 @@ export function doctorChecks(
       ];
       const tags = new Set(releases().map((r) => r.image));
       const orphans = images
-        .filter(
-          (i) =>
-            i.Labels?.["hoist.app"] ||
-            i.RepoTags?.some((t) => t.startsWith("hoist/")),
-        )
-        .filter((i) => !i.RepoTags?.some((t) => tags.has(t)));
+        .filter((image) => !image.RepoTags?.some((tag) => tags.has(tag)))
+        .flatMap((image) => {
+          const stale =
+            image.RepoTags?.filter((tag) => tag !== "<none>:<none>") ?? [];
+          return stale.length ? stale : [image.Id];
+        });
       requireCheck(
         !orphans.length,
-        `Remove orphan images: ${orphans.map((i) => i.Id).join(", ")}.`,
+        `Remove orphan images: ${orphans.join(", ")}.`,
       );
     },
     "Orphan routes": async () => {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { readdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { eventually } from "./harness";
 import { command, withSSH } from "./ssh";
 
@@ -168,4 +168,68 @@ scenario(
     });
   },
   240000,
+);
+
+scenario(
+  "multiline config stdin crosses real SSH and the Node client",
+  async () => {
+    await withSSH(async (h) => {
+      await h.control("apps:create", h.appName);
+      const save = async (args: string[], env = h.env) => {
+        const child = Bun.spawn(args, {
+          env,
+          stdin: new Blob(["l1\nl2"]),
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const output = await new Response(child.stderr).text();
+        expect(await child.exited, output).toBe(0);
+        const values = JSON.parse(
+          (await h.control("config:list", h.appName, "--reveal", "--json"))
+            .stdout,
+        );
+        expect(values).toContainEqual({
+          key: "PEM",
+          value: "l1\nl2",
+          length: 5,
+        });
+      };
+      await save([
+        ...h.ssh,
+        h.remote,
+        "hoist",
+        "config:set",
+        h.appName,
+        "PEM",
+        "--stdin",
+      ]);
+      await h.control("config:unset", h.appName, "PEM");
+      const bin = join(h.root, "client-bin");
+      await mkdir(bin);
+      const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+      await Bun.write(
+        join(bin, "ssh"),
+        "#!/bin/sh\nshift\nexec " +
+          [Bun.which("ssh") ?? "/usr/bin/ssh", ...h.ssh.slice(1), h.remote]
+            .map(quote)
+            .join(" ") +
+          ' "$@"\n',
+      );
+      await chmod(join(bin, "ssh"), 0o700);
+      await save(
+        [
+          "node",
+          resolve(import.meta.dir, "../../cli/bin/hoist.js"),
+          "--host",
+          "fixture",
+          "config:set",
+          h.appName,
+          "PEM",
+          "--stdin",
+        ],
+        { ...h.env, PATH: `${bin}:${process.env.PATH}` },
+      );
+    });
+  },
+  120000,
 );

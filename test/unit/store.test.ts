@@ -83,7 +83,7 @@ test("opening a newer schema fails", () => {
   store.db.exec(`PRAGMA user_version = ${schemaVersion + 1}`);
   store.close();
   stores.splice(stores.indexOf(store), 1);
-  expect(() => new SqliteStore(dir)).toThrow("newer than hoist");
+  expect(() => new SqliteStore(dir)).toThrow("newer than this hoist");
 });
 
 test("release numbers are isolated by app and branch; snapshots cannot be changed", () => {

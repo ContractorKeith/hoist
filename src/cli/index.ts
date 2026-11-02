@@ -27,7 +27,7 @@ export const verbs = [
   "apps:info <name> [--json]",
   "apps:destroy <name> [--force]",
   "apps:set <name> retention=N|branch=<name>",
-  "config:set <name> K=V [K=V...]",
+  "config:set <name> K=V [K=V...] | <name> KEY --stdin",
   "config:unset <name> K",
   "config:list <name> [--reveal] [--json]",
   "releases <name> [--branch <b>] [--json]",
@@ -42,8 +42,12 @@ export const verbs = [
   "ssh-dispatch",
   "serve",
 ];
-export const usage = () =>
-  `Usage: hoist <verb>\n${verbs.map((verb) => `  ${verb}`).join("\n")}`;
+export const publicVerbs = verbs.filter(
+  (verb) =>
+    !["serve", "ssh-dispatch", "git-hook"].includes(verb.split(" ")[0] ?? ""),
+);
+export const usage = (entries = verbs) =>
+  `Usage: hoist <verb>\n${entries.map((verb) => `  ${verb}`).join("\n")}`;
 
 // Compare recreation against process start, before delay or lease acquisition.
 const hookStartedAt = performance.timeOrigin;
@@ -92,8 +96,17 @@ export async function run(args: string[]): Promise<number> {
     if (args[0] === "ssh-dispatch" && args.length === 1) {
       const command = parseDispatch(process.env.SSH_ORIGINAL_COMMAND ?? "");
       if (command.kind === "cli") {
-        if (!Object.hasOwn(commands, command.args[0] ?? ""))
-          parseCli(command.args); // Internal entry points are never exposed over SSH.
+        const [verb] = command.args;
+        if (verb === "--help" && command.args.length === 1) {
+          console.log(usage(publicVerbs));
+          return 0;
+        }
+        if (
+          (!Object.hasOwn(commands, verb ?? "") && verb !== "version") ||
+          (["--help", "version"].includes(verb ?? "") &&
+            command.args.length !== 1)
+        )
+          throw new Error(usage(publicVerbs));
         return run(command.args);
       }
       const root = dataRoot();

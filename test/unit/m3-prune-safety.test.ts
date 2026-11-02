@@ -74,3 +74,69 @@ test("log removal failures preserve cutover, report once, and keep pruning other
     stderr.mockRestore();
   }
 });
+
+for (const missing of [false, true]) {
+  test(`retention removes a shared pruned tag once without warnings (missing=${missing})`, async () => {
+    const store = new FakeStore(),
+      docker = new FakeDocker();
+    const app = store.createApp("hello", "hello.test", "/");
+    store.setRetention(app.id, 1);
+    const one = reserveRelease(store, app, "main", "a".repeat(40));
+    one.status = "stopped";
+    const two = store.insertRelease({ ...one, number: 2 });
+    const live = reserveRelease(store, app, "main", "c".repeat(40));
+    live.status = "live";
+    let calls = 0;
+    docker.removeImage = async (image) => {
+      calls++;
+      if (missing || calls > 1)
+        throw new Error(
+          `Docker DELETE /images/${encodeURIComponent(image)}: 404 missing`,
+        );
+    };
+    const warnings: string[] = [];
+    await prune(
+      store,
+      docker,
+      app,
+      async () => {},
+      async (line) => {
+        warnings.push(line);
+      },
+    );
+    expect(calls).toBe(1);
+    expect(warnings).toEqual([]);
+    expect(one.pruned_at).toBeTruthy();
+    expect(two.pruned_at).toBeTruthy();
+    expect(live.pruned_at).toBeUndefined();
+  });
+}
+
+test("retention does not swallow a 404 mentioned inside a different Docker error", async () => {
+  const store = new FakeStore(),
+    docker = new FakeDocker();
+  const app = store.createApp("hello", "hello.test", "/");
+  const row = reserveRelease(store, app, "main", "a".repeat(40));
+  row.status = "failed";
+  const message =
+    "Docker DELETE /images/hoist%2Fhello%3Atag: 500 upstream: 404 missing";
+  docker.removeImage = async () => {
+    throw new Error(message);
+  };
+  const lines: string[] = [],
+    stderr = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await prune(
+      store,
+      docker,
+      app,
+      async () => {},
+      async (line) => {
+        lines.push(line);
+      },
+    );
+    expect(lines[0]).toContain(message);
+  } finally {
+    stderr.mockRestore();
+  }
+});

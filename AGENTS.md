@@ -58,9 +58,11 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - `HOIST_TLS=acme` (default) uses Let's Encrypt with `HOIST_ACME_EMAIL`; `internal` uses the local CA. `HOIST_HTTP_PORT`/`HOIST_HTTPS_PORT` default to 80/443; `HOIST_CADDY_ADMIN_PORT` defaults to 2019 and must match in serve and hooks. Caddy data lives in `HOIST_DIR/caddy`.
 - Containers use the single exposed TCP port (ignore UDP); no TCP exposure uses `PORT` or 8080; several TCP ports require `PORT`. Docker assigns the loopback-only published port.
 - SQLite `locks` leases serialize hook reserve/build/cutover and reconcile; heartbeat every 10 s, reclaim dead PIDs or heartbeats older than 60 s, poll 200 ms for 10 minutes, and abort waits on shutdown. No lock files.
+- Cutover commits the new `live` row and old `stopped` rows after the health check and route write, before retiring old containers.
+- Reconcile runs at boot and after every Caddy restart; restart attempts use bounded waits and retry on errors.
 - Health requires 2xx; redirects are not followed and 3xx fails cutover.
 - Reconcile updates routes per app under its lease, never loads a full snapshot, verifies container app/release labels, and removes non-live candidates as interrupted cutovers. Spawn config dedupes newest release id per host.
-- `apps:destroy` removes local resources and rows before routes; unreachable Caddy warns and succeeds because serve rebuilds routes.
+- `apps:destroy` refuses while a build holds the app lease; it does not wait. It removes local resources and rows before routes; unreachable Caddy warns and succeeds because serve rebuilds routes.
 - The SQLite `serve` lease enforces one supervisor per HOIST_DIR and records child_pid; after a crash, reap only the recorded pinned Caddy child for this directory before restarting.
 - A Caddy restart during a push may fail its route write; the hook fails that release and removes its candidate.
 - Five consecutive Caddy exits under 10 s fail serve with exit code and a 50-line stderr tail; shutdown/not-ready cleanup escalates SIGTERM to SIGKILL after 5 s.
@@ -87,7 +89,7 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 - Dashboard binds only `127.0.0.1:8700` (`HOIST_DASHBOARD_PORT`); Caddy serves `hoist.<HOIST_DOMAIN>` (`HOIST_DASHBOARD_HOST` overrides). Set the owner password with `hoist dashboard:set-password` (stdin or hidden TTY prompt).
 - Dashboard sessions last seven days; tokens are SHA-256 hashed in SQLite, cookies use `__Host-` names with Secure/HttpOnly/SameSite=Strict. Password changes atomically rotate a password version and revoke sessions; session issuance rechecks the verified credentials. Missing passwords, stale versions and invalid expiry timestamps fail closed. Login permits five failures per client IP per 15 minutes.
 - Every dashboard mutation is POST with CSRF, including logout; rollback/restart require confirmation. CSP allows only same-origin scripts/styles, denies framing/base URLs and restricts forms to self; log lines use textContent. Config rendering queries key names only.
-- E2e harnesses use unique app names and dashboard ports. Under heavy load, run Docker e2e with `flock /home/contractorkeith/.t3/worktrees/hoist/hoist-e2e.lock`; use `newgrp docker` when needed.
+- One Docker daemon hosts exactly one hoist instance. A second `serve`, a lab beside the e2e suite, or the installer container shares the daemon and will delete the other instance's containers. Unique app names and ports do not isolate instances. The e2e `flock /home/contractorkeith/.t3/worktrees/hoist/hoist-e2e.lock` is mandatory; stop other instances before testing and use `newgrp docker` when needed.
 - Dashboard action waits share serve’s shutdown signal; web shutdown waits at most 30 s and reports interrupted jobs. Caddy must be the only proxy; the last valid forwarded IP keys login throttling. Static assets cache for one year; other responses are no-store.
 - Legacy app/preview collisions with the dashboard host are suppressed in boot config and reconcile, including recovery; cutover refuses that host. Dashboard routing wins over release IDs.
 - Dashboard forms are streamed through a 16 KiB limit owned by the handler, so fixed/chunked oversized bodies get a secured HTML 413 without an expected-error stack trace.

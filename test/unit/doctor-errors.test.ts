@@ -110,3 +110,27 @@ test("missing Caddy binary reports the pinned installer fix instead of ENOENT", 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("TLS check rejects uppercase HOIST_DOMAIN with a named remedy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "doctor-domain-"));
+  const store = new SqliteStore(root);
+  const previous = process.env.HOIST_DOMAIN,
+    host = process.env.HOIST_DASHBOARD_HOST;
+  try {
+    process.env.HOIST_DOMAIN = "Example.COM";
+    delete process.env.HOIST_DASHBOARD_HOST;
+    const checks = doctorChecks(root, store, new FakeDocker());
+    const [result] = await runChecks({
+      "TLS and ports": checks["TLS and ports"] as () => unknown,
+    });
+    expect(result?.status).toBe("error");
+    expect(result?.message).toContain("HOIST_DOMAIN");
+  } finally {
+    if (previous === undefined) delete process.env.HOIST_DOMAIN;
+    else process.env.HOIST_DOMAIN = previous;
+    if (host === undefined) delete process.env.HOIST_DASHBOARD_HOST;
+    else process.env.HOIST_DASHBOARD_HOST = host;
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

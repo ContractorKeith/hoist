@@ -50,10 +50,13 @@ describe("doctor", () => {
     const docker = new FakeDocker();
     let routes: unknown[] = [],
       images: unknown[] = [];
-    const request = (async (input: string | URL | Request) =>
-      Response.json(
+    const request = (async (input: string | URL | Request) => {
+      if (String(input).includes("images/json"))
+        expect(String(input)).not.toContain("all=true");
+      return Response.json(
         String(input).includes("images/json") ? images : routes,
-      )) as typeof fetch;
+      );
+    }) as typeof fetch;
     try {
       const app = store.createApp("doctor-test", "doctor.test", "/");
       await createRepo(root, app.name);
@@ -131,6 +134,41 @@ describe("doctor", () => {
         (await runChecks({ key: checks["Secret key"] as () => unknown }))[0]
           ?.status,
       ).toBe("error");
+      store.insertRelease({
+        app_id: app.id,
+        branch: "main",
+        number: 1,
+        git_sha: "a".repeat(40),
+        image: "hoist/doctor-test:live",
+        config_json: "{}",
+        status: "live",
+      });
+      images = [
+        {
+          Id: "live",
+          RepoTags: ["hoist/doctor-test:live", "hoist/doctor-test:stale"],
+        },
+      ];
+      expect(
+        (
+          await runChecks({ images: checks["Orphan images"] as () => unknown })
+        )[0]?.status,
+      ).toBe("ok");
+      for (const dangling of [
+        { Id: "dangling", Labels: { "hoist.app": app.name } },
+        {
+          Id: "dangling",
+          RepoTags: ["<none>:<none>"],
+          Labels: { "hoist.app": app.name },
+        },
+      ]) {
+        images = [dangling];
+        const [result] = await runChecks({
+          images: checks["Orphan images"] as () => unknown,
+        });
+        expect(result?.status).toBe("error");
+        expect(result?.message).toContain("dangling");
+      }
       images = [
         {
           Id: "sha256:orphan",
@@ -138,6 +176,11 @@ describe("doctor", () => {
           Labels: {},
         },
       ];
+      expect(
+        (
+          await runChecks({ images: checks["Orphan images"] as () => unknown })
+        )[0]?.message,
+      ).toContain("hoist/unknown:main-v1");
       routes = [{ match: [{ host: ["orphan.test"] }] }];
       expect(
         (

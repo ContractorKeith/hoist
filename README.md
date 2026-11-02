@@ -4,11 +4,16 @@ Push a Dockerfile to one Linux server. Hoist builds a numbered release, checks i
 health, then serves it over HTTPS with Caddy. A failed release leaves the current
 one serving. MIT licensed; one Bun executable, Docker, Git and pinned Caddy.
 
-## Install
+## Requirements
+
+One Docker daemon hosts exactly one hoist instance; a second instance on the
+same daemon deletes the other's containers.
 
 Use a fresh Ubuntu 24.04 or Debian 12 server (x64 or arm64), with ports 22, 80 and
 443 open. Point `*.example.com` and `*.hello.example.com` at its IP; previews need
 the second wildcard. Hoist assumes this server's Docker daemon belongs to hoist.
+
+## Install
 
 Download and inspect the versioned installer, then run as root:
 
@@ -67,6 +72,14 @@ hoist rollback hello v1              # copies v1's image AND config into a new r
 hoist apps:set hello retention=10
 ```
 
+SSH command arguments are limited to about 8 KiB and cannot contain control
+characters. For multi-line or long secrets (up to 64 KiB), pass the value on stdin.
+A single trailing newline (LF or CRLF) is stripped:
+
+```sh
+hoist config:set hello PEM --stdin < private-key.pem
+```
+
 Config takes effect on the next push or restart. Back up `/var/lib/hoist/secret.key`
 with `hoist.db`; losing this key loses all encrypted config. Retention keeps five
 releases per branch by default and always protects the live release.
@@ -78,7 +91,17 @@ hoist logs hello -f
 hoist logs hello --release v2         # saved build/cutover log, even for failed pushes
 git push hoist feature-x             # https://feature-x.hello.example.com
 hoist previews:list hello --json
-git push hoist :feature-x            # tears down the preview
+```
+
+Tear down the preview either by deleting the remote branch:
+
+```sh
+git push hoist :feature-x
+```
+
+Or by removing the preview through the CLI:
+
+```sh
 hoist previews:destroy hello feature-x
 ```
 
@@ -127,7 +150,7 @@ hoist apps:list [--json]
 hoist apps:info <name> [--json]
 hoist apps:destroy <name> [--force]
 hoist apps:set <name> retention=N|branch=<name>
-hoist config:set <name> K=V [K=V...]
+hoist config:set <name> K=V [K=V...] | <name> KEY --stdin
 hoist config:unset <name> K
 hoist config:list <name> [--reveal] [--json]
 hoist releases <name> [--branch <b>] [--json]

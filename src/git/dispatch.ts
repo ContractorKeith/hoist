@@ -3,11 +3,13 @@ import { appName } from "../core/validation";
 // Tokenize quoting only. Shell expansion, operators and escapes never run.
 export function commandArgs(command: string): string[] {
   if (
-    !command ||
     command.length > 8192 ||
     [...command].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
   )
-    throw new Error("Invalid SSH command");
+    throw new Error(
+      "Invalid SSH command; use config:set KEY --stdin for multi-line or long values",
+    );
+  if (!command) throw new Error("Invalid SSH command");
   const args: string[] = [];
   let token = "",
     quote = "",

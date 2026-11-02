@@ -72,7 +72,15 @@ async function startHealthy(
   } catch (error) {
     if (id) {
       await docker.stopContainer(id).catch(() => {});
-      await docker.removeContainer(id);
+      try {
+        await docker.removeContainer(id);
+      } catch (cleanup) {
+        const detail = (value: unknown) =>
+          value instanceof Error ? value.message : String(value);
+        throw new Error(`${detail(error)}; cleanup: ${detail(cleanup)}`, {
+          cause: error,
+        });
+      }
     }
     throw error;
   }
@@ -126,7 +134,12 @@ export async function cutover(
         row.status === "live" &&
         row.branch === release.branch &&
         row.id !== release.id,
-    );
+    )
+    .map((row) => ({ ...row }));
+  store.transaction(() => {
+    for (const row of old) store.setReleaseState(row.id, "stopped");
+    store.setReleaseState(release.id, "live", id);
+  });
   for (const row of old) {
     await log("Stopping previous container");
     if (row.container_id) {
@@ -138,10 +151,6 @@ export async function cutover(
       }
     }
   }
-  store.transaction(() => {
-    for (const row of old) store.setReleaseState(row.id, "stopped");
-    store.setReleaseState(release.id, "live", id);
-  });
   await log(`Live: https://${host}`);
 }
 

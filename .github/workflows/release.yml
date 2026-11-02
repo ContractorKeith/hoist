@@ -16,6 +16,13 @@ jobs:
         with:
           platforms: arm64
       - run: bun install --frozen-lockfile
+      - name: Validate release tag
+        run: |
+          printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || exit 1
+          version=${GITHUB_REF_NAME#v}
+          version=${version%%-*}
+          test "$version" = "$(bun -p "require('./package.json').version")"
+      - run: bun run typecheck && bun test
       - run: bun run release:check
       - name: Assemble checksums and release notes
         shell: bash
@@ -27,9 +34,11 @@ jobs:
           # Embed binary digests in the installer asset; keep the repository block empty.
           x64_sha=$(awk '$2 == "hoist-linux-x64" { print $1 }' .tmp/checksums.txt)
           arm64_sha=$(awk '$2 == "hoist-linux-arm64" { print $1 }' .tmp/checksums.txt)
-          sed -i "/^# BEGIN HOIST PINS/,/^# END HOIST PINS/ { s/^HOIST_X64_SHA256=.*/HOIST_X64_SHA256=$x64_sha/; s/^HOIST_ARM64_SHA256=.*/HOIST_ARM64_SHA256=$arm64_sha/; }" install.sh
+          sed -i "s/^# Hoist v[^:]*:/# Hoist $GITHUB_REF_NAME:/" install.sh
+          sed -i 's/^HOIST_VERSION=.*/HOIST_VERSION=${HOIST_VERSION:-'"$GITHUB_REF_NAME"'}/' install.sh
+          sed -i "/^# BEGIN HOIST PINS/,/^# END HOIST PINS/ { s/^HOIST_PINNED_VERSION=.*/HOIST_PINNED_VERSION=$GITHUB_REF_NAME/; s/^HOIST_X64_SHA256=.*/HOIST_X64_SHA256=$x64_sha/; s/^HOIST_ARM64_SHA256=.*/HOIST_ARM64_SHA256=$arm64_sha/; }" install.sh
           version=${GITHUB_REF_NAME#v}
-          version=${version%%-rc*}
+          version=${version%%-*}
           awk -v v="$version" '/^## / { if (found) exit; if ($2 == v) { found=1; next } } found' CHANGELOG.md > .tmp/notes.md
           test -s .tmp/notes.md
       - name: Run arm64 binary
@@ -37,7 +46,9 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          .tmp/hoist-linux-x64 .tmp/hoist-linux-arm64 .tmp/checksums.txt install.sh
-          --title "hoist $GITHUB_REF_NAME" --notes-file .tmp/notes.md
+        run: |
+          prerelease=
+          case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" ${prerelease:+"$prerelease"} \
+            .tmp/hoist-linux-x64 .tmp/hoist-linux-arm64 .tmp/checksums.txt install.sh \
+            --title "hoist $GITHUB_REF_NAME" --notes-file .tmp/notes.md

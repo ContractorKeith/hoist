@@ -136,6 +136,9 @@ scenario(
         });
         await docker.removeContainer(mixed);
         await docker.removeImage(tag);
+        await expect(docker.removeImage(tag)).rejects.toThrow(
+          /^Docker DELETE \/images\/[^:]*: 404\b/,
+        );
       },
     );
   },
