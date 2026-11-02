@@ -126,7 +126,9 @@ test("migration 2 preserves M0 releases, adds built and keeps immutable snapshot
   const before = legacy.query("SELECT * FROM releases").all();
   legacy.close();
   const store = open(dir);
-  expect(store.db.query("SELECT * FROM releases").all()).toEqual(before);
+  expect(store.db.query("SELECT * FROM releases").all()).toEqual(
+    before.map((row) => ({ ...(row as object), pruned_at: null })),
+  );
   store.completeRelease(1);
   expect(store.releases(1)[0]?.status).toBe("built");
   expect(() => store.db.run("UPDATE releases SET status = 'bogus'")).toThrow();

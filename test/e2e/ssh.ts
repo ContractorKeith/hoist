@@ -291,12 +291,12 @@ async function startSSH(executable?: string) {
     };
     const push = () =>
       command(["git", "push", "hoist", "main"], { cwd: source, env: pushEnv });
-    const request = async (host = "hello.example.test") => {
+    const request = async (host = "hello.example.test", path = "/") => {
       const ca = await readFile(
         join(data, "caddy/pki/authorities/local/root.crt"),
         "utf8",
       );
-      return fetch(`https://127.0.0.1:${https}/`, {
+      return fetch(`https://127.0.0.1:${https}${path}`, {
         headers: { Host: host },
         tls: { ca, serverName: host },
         signal: AbortSignal.timeout(2000),

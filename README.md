@@ -84,7 +84,7 @@ Closing the terminal mid-push does not cancel the deploy; the release still land
 
 The push streams Docker's build records and saves the same bytes to
 `$HOIST_DIR/releases/hello/main/v1/build.log`. The release records the full SHA and image
-`hoist/hello:main-v1-<first-12-SHA-characters>`, with an empty config snapshot. The container uses its single exposed TCP port (UDP exposures are ignored); with no
+`hoist/hello:main-v1-<first-12-SHA-characters>`, with the current encrypted config snapshot. The container uses its single exposed TCP port (UDP exposures are ignored); with no
 exposed TCP port it uses config `PORT`, defaulting to `8080`. Several exposed TCP ports
 require `PORT` in config; otherwise the push fails with an actionable error. Docker assigns a
 random host port published only on `127.0.0.1`. Health requires HTTP **2xx**; redirects
@@ -111,6 +111,43 @@ that Caddy is unreachable, and lets the next `serve` rebuild routes from the sto
 Local `apps:destroy` asks for the app name on a TTY. Without a TTY, `--force` is required.
 The data directory and created files are private (directories and executable hooks `0700`,
 ordinary files `0600`; executable checkout files retain owner execute permission).
+
+## Config, rollback and retention
+
+```bash
+ssh hoist@server hoist config:set hello DATABASE_URL='postgres://…' PORT=8080
+ssh hoist@server hoist config:list hello              # masked values
+ssh hoist@server hoist config:list hello --json --reveal
+ssh hoist@server hoist config:unset hello PORT
+ssh hoist@server hoist restart hello
+ssh hoist@server hoist releases hello --json
+ssh hoist@server hoist rollback hello v1
+ssh hoist@server hoist rollback hello                 # previous stopped main release
+ssh hoist@server hoist apps:set hello retention=10
+```
+
+Saving config takes effect on the next push or restart. Keys are uppercase identifiers;
+values may contain `=` and may be empty, with a 64 KiB limit and no NUL. Config values and
+release snapshots are encrypted with AES-256-GCM. The generated 32-byte
+`$HOIST_DIR/secret.key` is private (0600). Back up `secret.key`; losing it loses every
+config value. A missing key is generated only when no current or historical encrypted
+config exists; otherwise restore it from backup. Non-regular key files are refused.
+Only `--reveal` and container startup decrypt values.
+
+Restart creates a new numbered main release from the live image and current config.
+Rollback creates a new release copying the target image and its config snapshot. Both
+use the push cutover path under the app lease and save progress in `build.log`.
+Failed, building, unknown and already-live rollback targets are refused, as are targets
+whose images are gone. A shared image can still be rolled back to after its old logs are pruned.
+
+After successful cutover, retention keeps the newest five live/stopped/built releases
+per app and branch by default (`retention=1..100`). The live release is always protected.
+Prune is best effort after cutover: cleanup errors warn in the new release log and stderr
+without rejecting the push, restart or rollback.
+Older releases get `pruned_at`; their log directories and unreferenced image tags are
+removed. Shared image tags used by retained rollbacks stay. Failed releases are marked pruned
+after image cleanup is attempted, while their log directories stay for M4. Masked config
+listings omit value lengths; `--reveal` includes values and byte lengths.
 
 ## Development
 

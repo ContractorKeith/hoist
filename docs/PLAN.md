@@ -119,13 +119,20 @@ Rules that hold the shape:
 ```
 apps        id, name (unique), domain, health_path, retention, created_at
 releases    id, app_id, branch, number, git_sha, image, config_json (encrypted), status
-            (building|built|live|stopped|failed), container_id, created_at
+            (building|built|live|stopped|failed), container_id, created_at, pruned_at (nullable)
 config      app_id, key, value (encrypted)       -- current config; snapshotted into releases
 previews    app_id, branch, slug, last_push_at    -- current release is the newest live release
                                                    for (app_id, branch)
 sessions    token_hash, expires_at
 locks       name (primary key), owner_pid, heartbeat_at, acquired_at, child_pid (nullable)
 ```
+
+`HOIST_DIR/secret.key` holds the generated 32-byte AES-256-GCM key with mode 0600.
+Config values use `v1:<iv>:<ciphertext>` with base64 fields and a random 12-byte IV.
+AES-GCM additional data binds each value to `${app_id}:${key}`, including snapshot entries.
+Back up the key with the database. `pruned_at` records retention processing without changing
+status; failed rows retain their log directories. Rollback checks image existence rather
+than `pruned_at`, since retained releases may share an image tag.
 
 `number` is per `(app_id, branch)`; image tags are `hoist/<app>:<branch-slug>-v<number>-<sha12>`, unique to each release. Main-branch releases are `v1, v2, ...`; a preview has its own
 `v1, v2, ...`. Rollback inserts a new row copying `image` and `config_json` from the target.

@@ -66,6 +66,7 @@ export const migrations = [
     acquired_at TEXT NOT NULL,
     child_pid INTEGER
   );`,
+  `ALTER TABLE releases ADD COLUMN pruned_at TEXT;`,
 ] as const;
 
 export const schemaVersion = migrations.length;

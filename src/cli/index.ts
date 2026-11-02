@@ -1,73 +1,41 @@
-import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { version } from "../../package.json";
 import { Caddy } from "../adapters/caddy";
 import { Docker } from "../adapters/docker";
 import { checkHealth } from "../adapters/health";
-import { hostName } from "../adapters/validation";
-import { createApp, destroyApp, knownApp } from "../core/apps";
 import { wasBuildErrorLogged } from "../core/build";
-import { appName, healthPath } from "../core/validation";
+import { appName } from "../core/validation";
 import { dataRoot } from "../data";
 import { parseDispatch } from "../git/dispatch";
 import { receive } from "../git/hook";
-import { createRepo } from "../git/repository";
 import { caddySettings, serve } from "../server";
 import { SqliteStore } from "../store/sqlite";
+import { appsCommand, appsSet, parseCli } from "./apps";
+import { configCommand } from "./config";
+import { releasesCommand } from "./releases";
 
-const usage =
-  "Usage: hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] | apps:list [--json] | apps:info <name> [--json] | apps:destroy <name> [--force] | version";
+const commands: Record<
+  string,
+  (
+    root: string,
+    store: SqliteStore,
+    args: string[],
+  ) => number | void | Promise<number> | Promise<void>
+> = {
+  "config:set": (_root, store, args) => configCommand(store, args),
+  "config:unset": (_root, store, args) => configCommand(store, args),
+  "config:list": (_root, store, args) => configCommand(store, args),
+  releases: releasesCommand,
+  restart: releasesCommand,
+  rollback: releasesCommand,
+  "apps:create": appsCommand,
+  "apps:list": appsCommand,
+  "apps:info": appsCommand,
+  "apps:destroy": appsCommand,
+  "apps:set": (_root, store, args) => appsSet(store, args),
+};
 
-export function parseCli(args: string[]): {
-  verb: string;
-  name?: string;
-  domain?: string;
-  health?: string;
-  json: boolean;
-  force: boolean;
-} {
-  const [verb, ...rest] = args;
-  if (
-    !verb ||
-    ![
-      "version",
-      "apps:create",
-      "apps:list",
-      "apps:info",
-      "apps:destroy",
-    ].includes(verb)
-  )
-    throw new Error(usage);
-  const result = {
-    verb,
-    name: undefined as string | undefined,
-    domain: undefined as string | undefined,
-    health: undefined as string | undefined,
-    json: false,
-    force: false,
-  };
-  if (verb !== "version" && verb !== "apps:list") {
-    const name = rest.shift() ?? "";
-    if (name.startsWith("--")) throw new Error(usage);
-    result.name = appName(name);
-  }
-  const seen = new Set<string>();
-  while (rest.length) {
-    const flag = rest.shift() ?? "";
-    if (seen.has(flag)) throw new Error(usage);
-    seen.add(flag);
-    if (flag === "--json" && ["apps:list", "apps:info"].includes(verb))
-      result.json = true;
-    else if (flag === "--force" && verb === "apps:destroy") result.force = true;
-    else if (flag === "--domain" && verb === "apps:create") {
-      result.domain = (rest.shift() ?? "").toLowerCase();
-      hostName(result.domain);
-    } else if (flag === "--health-path" && verb === "apps:create")
-      result.health = healthPath(rest.shift() ?? "");
-    else throw new Error(usage);
-  }
-  return result;
-}
+export { parseCli } from "./apps";
 
 export async function run(args: string[]): Promise<number> {
   let store: SqliteStore | undefined;
@@ -79,7 +47,8 @@ export async function run(args: string[]): Promise<number> {
     if (args[0] === "ssh-dispatch" && args.length === 1) {
       const command = parseDispatch(process.env.SSH_ORIGINAL_COMMAND ?? "");
       if (command.kind === "cli") {
-        parseCli(command.args); // Internal entry points are never exposed over SSH.
+        if (!Object.hasOwn(commands, command.args[0] ?? ""))
+          parseCli(command.args); // Internal entry points are never exposed over SSH.
         return run(command.args);
       }
       const root = dataRoot();
@@ -138,78 +107,16 @@ export async function run(args: string[]): Promise<number> {
       }
       return 0;
     }
-    const command = parseCli(args);
-    if (command.verb === "version") {
-      console.log(version);
-      return 0;
+    const handler = Object.hasOwn(commands, args[0] ?? "")
+      ? commands[args[0] ?? ""]
+      : undefined;
+    if (handler) {
+      const root = dataRoot();
+      store = new SqliteStore(root);
+      return (await handler(root, store, args)) ?? 0;
     }
-    const root = dataRoot();
-    store = new SqliteStore(root);
-    if (command.verb === "apps:list") {
-      const apps = store.apps();
-      console.log(
-        command.json
-          ? JSON.stringify(apps)
-          : apps.map((a) => `${a.name}\t${a.domain}`).join("\n"),
-      );
-      return 0;
-    }
-    const name = appName(command.name ?? "");
-    if (command.verb === "apps:create") {
-      if (!command.domain && !process.env.HOIST_DOMAIN)
-        throw new Error(
-          "HOIST_DOMAIN is not set; pass --domain or set HOIST_DOMAIN",
-        );
-      const domain = command.domain ?? `${name}.${process.env.HOIST_DOMAIN}`;
-      hostName(domain);
-      await createApp(
-        store,
-        name,
-        domain,
-        command.health ?? "/",
-        () => createRepo(root, name),
-        () =>
-          rm(join(root, "repos", `${name}.git`), {
-            recursive: true,
-            force: true,
-          }),
-      );
-      console.log(
-        `Created ${name} (${domain}); git remote add hoist hoist@<server>:${name}.git`,
-      );
-      return 0;
-    }
-    const app = knownApp(store, name);
-    if (command.verb === "apps:info") {
-      const info = { ...app, releases: store.releases(app.id) };
-      console.log(
-        command.json ? JSON.stringify(info) : JSON.stringify(info, null, 2),
-      );
-      return 0;
-    }
-    if (!command.force) {
-      if (!process.stdin.isTTY)
-        throw new Error("apps:destroy requires --force without a TTY");
-      if (prompt(`Destroy ${name}? Type ${name} to confirm:`) !== name)
-        throw new Error("Destroy cancelled");
-    }
-    await destroyApp(
-      store,
-      new Docker(),
-      app,
-      async () => {
-        await rm(join(root, "repos", `${name}.git`), {
-          recursive: true,
-          force: true,
-        });
-        await rm(join(root, "releases", name), {
-          recursive: true,
-          force: true,
-        });
-      },
-      new Caddy(caddySettings(root).adminPort),
-    );
-    console.log(`Destroyed ${name}`);
+    parseCli(args);
+    console.log(version);
     return 0;
   } catch (error) {
     if (!wasBuildErrorLogged(error))

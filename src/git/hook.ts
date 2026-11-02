@@ -2,12 +2,14 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { SqliteAppLocks } from "../adapters/app-lock";
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
+import { removeReleaseLogs } from "../cli/releases";
 import {
   buildRelease,
   removeReleaseImages,
   reserveRelease,
 } from "../core/build";
 import { cutover, type HealthCheck } from "../core/cutover";
+import { prune } from "../core/retention";
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
 import type { App, Release, Store } from "../store/interface";
@@ -164,6 +166,15 @@ async function receiveLocked(
             const chunk = new TextEncoder().encode(`${message}\n`);
             await logFile.writeFile(chunk);
             await Bun.write(Bun.stderr, chunk).catch(() => {});
+          },
+        );
+        await prune(
+          store,
+          docker,
+          app,
+          removeReleaseLogs(root, app.name),
+          async (message) => {
+            await logFile.writeFile(`${message}\n`);
           },
         );
       } finally {

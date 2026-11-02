@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
+import { keyfile, verifyKeyfile } from "../adapters/keyfile";
 import { privatePath } from "../data";
 import type { App, LockClaim, LockRow, Release, Store } from "./interface";
 import { migrations, schemaVersion } from "./migrations";
@@ -7,7 +8,7 @@ import { migrations, schemaVersion } from "./migrations";
 export class SqliteStore implements Store {
   readonly db: Database;
 
-  constructor(dataDir: string) {
+  constructor(readonly dataDir: string) {
     if (!dataDir || dataDir.includes("\0"))
       throw new Error("Invalid data directory");
     privatePath(dataDir, true, false, dataDir);
@@ -46,6 +47,66 @@ export class SqliteStore implements Store {
       .immediate();
   }
 
+  private key?: Promise<CryptoKey>;
+  private hasEncryptedConfig(): boolean {
+    return !!this.db
+      .query<{ encrypted: number }, []>(
+        "SELECT EXISTS(SELECT 1 FROM config UNION ALL SELECT 1 FROM releases WHERE config_json <> '{}') AS encrypted",
+      )
+      .get()?.encrypted;
+  }
+  secretKey(verifyFile = false): Promise<CryptoKey> {
+    this.key ??= keyfile(this.dataDir, () => !this.hasEncryptedConfig());
+    if (!verifyFile) return this.key;
+    return this.key.then(async (key) => {
+      try {
+        await verifyKeyfile(this.dataDir, key);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if (this.hasEncryptedConfig())
+          throw new Error(
+            "secret.key is missing but encrypted config exists; restore the key from backup",
+          );
+        this.key = undefined;
+        return this.secretKey(true);
+      }
+      return key;
+    });
+  }
+  config(appId: number): Record<string, string> {
+    return Object.fromEntries(
+      this.db
+        .query<{ key: string; value: string }, [number]>(
+          "SELECT key, value FROM config WHERE app_id = ? ORDER BY key",
+        )
+        .all(appId)
+        .map((row) => [row.key, row.value]),
+    );
+  }
+  setConfig(appId: number, key: string, value: string): void {
+    this.db.run(
+      "INSERT INTO config (app_id, key, value) VALUES (?, ?, ?) ON CONFLICT(app_id, key) DO UPDATE SET value=excluded.value",
+      [appId, key, value],
+    );
+  }
+  unsetConfig(appId: number, key: string): void {
+    this.db.run("DELETE FROM config WHERE app_id = ? AND key = ?", [
+      appId,
+      key,
+    ]);
+  }
+  setRetention(appId: number, retention: number): void {
+    this.db.run("UPDATE apps SET retention = ? WHERE id = ?", [
+      retention,
+      appId,
+    ]);
+  }
+  markPruned(id: number): void {
+    this.db.run(
+      "UPDATE releases SET pruned_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+      [id],
+    );
+  }
   latestReleaseNumber(appId: number, branch: string): number {
     return (
       this.db
