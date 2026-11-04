@@ -76,7 +76,10 @@ scenario(
       );
       expect(body).toContain("HOIST_TEST_SECRET");
       expect(body).not.toContain(secret);
-      expect(body).not.toContain(String(secret.length));
+      // Check the length only in the config list; CSRF tokens, SHAs and timestamps are random digits.
+      const config = body.match(/<dl>[\s\S]*?<\/dl>/)?.[0] ?? "";
+      expect(config).toContain("••••••••");
+      expect(config).not.toContain(String(secret.length));
       expect(body).toContain("v1");
       expect(body).toContain("v2");
       const logsPath = `${base}/logs`;
