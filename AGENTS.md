@@ -43,10 +43,10 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 
 ## Conventions & Gotchas
 
-- Persistent data uses `apps.volume_path` and the app-owned named volume `hoist-<app>-data`, labelled with app name and ID. Production cutover/recovery mounts it read-write; previews never mount it. Branch changes refuse to reclassify a live production release while its volume is configured.
-- Volumes survive releases, rollback, restart, retention and serve restarts. Old/new containers overlap during health checks; apps must coordinate writes. Rollback does not restore data.
-- `apps:volume:rm <app> --force` fails fast on the app lease and refuses in-use volumes; success clears the path. Path changes require removing the volume first. `apps:destroy` refuses while the volume exists unless `--delete-volume` is passed; `--force` never deletes data.
-- Doctor flags missing configured volumes (next production use recreates them empty) and orphan named volumes. Back up volumes separately from HOIST_DIR.
+- Persistent data uses `apps.volume_path` and the app-owned named volume `hoist-<app>-data`, labelled with app name and ID. Production cutover/recovery mounts it read-write; previews never mount it. With a volume, branch changes set `pending_main_branch`: existing production keeps serving until the first healthy push of that branch retires it. Live preview promotion is refused; destroy the preview before selecting it.
+- Volumes survive releases, rollback, restart, retention and serve restarts. Old/new containers overlap during health checks; apps must coordinate writes. Rollback does not restore data; mounts use current app config even for pre-volume images. Setting a mount does not migrate old container files; Docker seeds a new volume from the image directory (avoid /app, /usr, /etc).
+- `apps:volume:rm <app> --force` fails fast on the app lease and refuses in-use volumes; success clears the path. Path changes require removing the volume first. `apps:destroy` refuses while the volume exists unless `--delete-volume` is passed; `--force` only skips confirmation.
+- Doctor filters `hoist.app`-labelled volumes and flags missing configured volumes (next production use recreates them empty), stale app IDs and app IDs without volume config. Back up volumes separately from HOIST_DIR; restore with both ownership labels from the new apps:info ID.
 
 - Closing the terminal mid-push does not cancel the deploy; the release still lands server-side.
 - `HOIST_DIR` (default `/var/lib/hoist`) holds the private database, bare repos, temporary checkouts and release logs; `HOIST_DOMAIN` supplies the default base domain until M7.

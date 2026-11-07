@@ -16,6 +16,7 @@ export interface App {
   retention?: number;
   main_branch?: string | null;
   volume_path?: string | null;
+  pending_main_branch?: string | null;
 }
 export interface Release {
   id: number;
@@ -40,6 +41,7 @@ export interface Store {
   stopBranchReleases(appId: number, branch: string): void;
   removePreview(appId: number, branch: string): void;
   setVolumePath(appId: number, path: string | null): void;
+  setPendingMainBranch(appId: number, branch: string | null): void;
   setMainBranch(appId: number, branch: string): void;
   previews(appId: number): Preview[];
   upsertPreview(input: Preview): void;

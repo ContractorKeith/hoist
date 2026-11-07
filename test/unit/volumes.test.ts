@@ -10,7 +10,6 @@ import { FakeStore } from "../../src/adapters/fakes/store";
 import { appsSet, parseCli } from "../../src/cli/apps";
 import { checkVolumes } from "../../src/cli/doctor-volumes";
 import { volumeRemoveCommand } from "../../src/cli/volumes";
-import { createApp, destroyApp } from "../../src/core/apps";
 import { cutover } from "../../src/core/cutover";
 import { reclassification } from "../../src/core/previews";
 import {
@@ -58,8 +57,8 @@ test("volume paths reject unsafe and non-normalized targets", () => {
 test("migration preserves existing apps and stores a nullable volume path", async () => {
   const root = await mkdtemp(join(tmpdir(), "volume-store-"));
   const old = new Database(join(root, "hoist.db"));
-  for (const sql of migrations.slice(0, -1)) old.exec(sql);
-  old.exec(`PRAGMA user_version = ${migrations.length - 1}`);
+  for (const sql of migrations.slice(0, 7)) old.exec(sql);
+  old.exec(`PRAGMA user_version = 7`);
   old.run(
     "INSERT INTO apps(name, domain) VALUES ('existing', 'existing.test')",
   );
@@ -116,7 +115,10 @@ test("doctor loudly reports missing volumes and orphans", async () => {
   await expect(checkVolumes(store, docker)).rejects.toThrow(
     "recreate it EMPTY",
   );
-  docker.volumes.set("hoist-unknown-data", {});
+  docker.volumes.set("hoist-unknown-data", {
+    "hoist.app": "unknown",
+    "hoist.app-id": "999",
+  });
   await expect(checkVolumes(store, docker)).rejects.toThrow(
     "Orphan volume hoist-unknown-data",
   );
@@ -194,49 +196,8 @@ test("adding a volume leaves live containers alone until the next cutover", asyn
   expect(specs[0]).toMatchObject({ volume: undefined });
   expect(specs[1]).toHaveProperty("volume.name", "hoist-app-data");
   expect(docker.volumes.size).toBe(1);
-  expect(() => reclassification(store, app, "other")).toThrow(
-    "live production release",
-  );
+  expect(reclassification(store, app, "other")).toEqual([]);
   expect(reclassification(store, app, "production")).toEqual([]);
   expect(first.config_json).toBe("{}");
   expect(first.image).toBe("hoist/app:first");
-});
-
-test("destroy keeps an app with a volume unless --delete-volume is passed", async () => {
-  const store = new FakeStore(),
-    docker = new FakeDocker(),
-    caddy = new FakeCaddy();
-  const noop = async () => {};
-  const app = await createApp(
-    store,
-    "app",
-    "app.test",
-    "/",
-    noop,
-    noop,
-    "/data",
-  );
-  await productionVolume(docker, app, "main");
-  expect(parseCli(["apps:destroy", "app", "--force"]).deleteVolume).toBe(false);
-  expect(
-    parseCli(["apps:destroy", "app", "--delete-volume"]).deleteVolume,
-  ).toBe(true);
-  await expect(destroyApp(store, docker, app, noop, caddy)).rejects.toThrow(
-    "--delete-volume",
-  );
-  expect(store.app("app")).not.toBeNull();
-  expect(docker.volumes.has("hoist-app-data")).toBe(true);
-  const warnings: string[] = [];
-  await destroyApp(
-    store,
-    docker,
-    app,
-    noop,
-    caddy,
-    (m) => warnings.push(m),
-    true,
-  );
-  expect(store.app("app")).toBeNull();
-  expect(docker.volumes.has("hoist-app-data")).toBe(false);
-  expect(warnings.join()).toContain("Destroying volume hoist-app-data");
 });

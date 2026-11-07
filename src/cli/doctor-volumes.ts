@@ -7,7 +7,7 @@ export async function checkVolumes(
   docker: DockerClient,
 ): Promise<string> {
   const apps = store.apps();
-  const volumes = await docker.listVolumes();
+  const volumes = await docker.listVolumes(["hoist.app"]);
   const lines: string[] = [],
     problems: string[] = [];
   for (const app of apps) {
@@ -24,11 +24,13 @@ export async function checkVolumes(
     )
       problems.push(`Volume ${name} ownership does not match app ${app.name}`);
   }
-  const known = new Set(apps.map(appVolumeName));
+  const known = new Set(
+    apps.filter((app) => app.volume_path).map((app) => String(app.id)),
+  );
   for (const volume of volumes)
-    if (/^hoist-.+-data$/.test(volume.name) && !known.has(volume.name))
+    if (!known.has(volume.labels["hoist.app-id"] ?? ""))
       problems.push(
-        `Orphan volume ${volume.name}: no app; inspect before removing`,
+        `Orphan volume ${volume.name}: no configured app with this id; inspect before removing`,
       );
   if (problems.length) throw new Error([...lines, ...problems].join("; "));
   return lines.join("; ") || "No app volumes configured.";

@@ -1,9 +1,15 @@
 import type { CaddyAdmin, DockerClient } from "../adapters/interfaces";
 import type { App, Store } from "../store/interface";
 import { removeImages } from "./build";
+import { ownsContainer } from "./cutover";
 import { availableHost, previewHost, releaseHost } from "./previews";
 import { appName, healthPath } from "./validation";
-import { ownedVolume, volumePath } from "./volumes";
+import {
+  appVolumeName,
+  ownedVolume,
+  removeAppVolume,
+  volumePath,
+} from "./volumes";
 
 export function knownApp(store: Store, name: string): App {
   const app = store.app(appName(name));
@@ -55,12 +61,25 @@ export async function destroyApp(
   warn: (message: string) => void = console.error,
   deleteVolume = false,
 ): Promise<void> {
-  if (store.releases(app.id).some((release) => release.status === "building"))
+  const releases = store.releases(app.id);
+  if (releases.some((release) => release.status === "building"))
     throw new Error(
       `a build is in progress for ${app.name}; wait for it to finish and retry`,
     );
-  // Data is deleted only on an explicit flag; refuse before touching anything.
   const volume = await ownedVolume(docker, app);
+  if (
+    volume &&
+    (await docker.listContainers({})).some(
+      (c) =>
+        c.volumes?.includes(volume.name) &&
+        !releases.some(
+          (row) => row.container_id === c.id && ownsContainer(c, app, row),
+        ),
+    )
+  )
+    throw new Error(
+      `Stop containers using ${volume.name}, then retry; no app resources were removed`,
+    );
   if (volume && !deleteVolume)
     throw new Error(
       `${app.name} has volume ${volume.name}; pass --delete-volume to delete it and all its data`,
@@ -71,15 +90,13 @@ export async function destroyApp(
     await docker.stopContainer(container.id);
     await docker.removeContainer(container.id);
   }
-  if (volume) {
-    warn(`Destroying volume ${volume.name} and all its data`);
-    await docker.removeVolume(volume.name);
-  }
+  if (volume) warn(`Destroying volume ${appVolumeName(app)} and all its data`);
+  await removeAppVolume(docker, app);
   await removeImages(docker, { "hoist.app": app.name });
   const hosts = new Set([
     app.domain,
     ...store.previews(app.id).map((row) => previewHost(app, row.branch)),
-    ...store.releases(app.id).map((row) => releaseHost(app, row.branch)),
+    ...releases.map((row) => releaseHost(app, row.branch)),
   ]);
   await cleanup();
   store.deleteApp(app.id);

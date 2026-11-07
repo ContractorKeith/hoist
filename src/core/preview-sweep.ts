@@ -4,7 +4,7 @@ import type {
   DockerClient,
 } from "../adapters/interfaces";
 import type { Store } from "../store/interface";
-import { destroyPreview } from "./previews";
+import { destroyPreview, productionBranch } from "./previews";
 export function previewTTL(
   value = process.env.HOIST_PREVIEW_TTL_DAYS ?? "7",
 ): number {
@@ -43,10 +43,7 @@ export async function sweepPreviews(
               );
               continue;
             }
-            if (
-              pushedAt >= cutoff ||
-              preview.branch === (app.main_branch ?? "main")
-            )
+            if (pushedAt >= cutoff || productionBranch(app, preview.branch))
               continue;
             try {
               await destroyPreview(

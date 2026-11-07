@@ -8,7 +8,12 @@ import type {
 } from "../adapters/interfaces";
 import { knownApp } from "../core/apps";
 import { ownsContainer } from "../core/cutover";
-import { reclassification, releaseHost, setMainBranch } from "../core/previews";
+import {
+  branchSettings,
+  reclassification,
+  releaseHost,
+  setMainBranch,
+} from "../core/previews";
 import { appName, branchSlug } from "../core/validation";
 import { dataRoot } from "../data";
 import { caddySettings } from "../server";
@@ -36,7 +41,7 @@ export async function setAppBranch(
     async () => {
       const app = knownApp(store, name);
       const releases = store.releases(app.id);
-      const updated = { ...app, main_branch: branch };
+      const updated = branchSettings(app, branch);
       reclassification(store, app, branch);
       try {
         const caddy =
@@ -76,7 +81,9 @@ export async function setAppBranch(
         );
       }
       setMainBranch(store, app, branch);
-      (context?.write ?? console.log)(`Main branch for ${name}: ${branch}`);
+      (context?.write ?? console.log)(
+        `Main branch for ${name}: ${branch}${updated.pending_main_branch ? " (pending first successful push; current production keeps serving)" : ""}`,
+      );
     },
   );
 }

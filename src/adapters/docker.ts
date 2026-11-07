@@ -45,8 +45,12 @@ export class Docker implements DockerClient {
     return response;
   }
 
-  async listVolumes() {
-    const row = (await (await this.request("/volumes")).json()) as {
+  async listVolumes(labels: string[] = []) {
+    validate.labels(Object.fromEntries(labels.map((key) => [key, ""])));
+    const query = new URLSearchParams({
+      filters: JSON.stringify({ label: labels }),
+    });
+    const row = (await (await this.request(`/volumes?${query}`)).json()) as {
       Volumes: { Name: string; Labels?: Labels | null }[] | null;
     };
     return (row.Volumes ?? []).map((v) => ({
@@ -343,10 +347,16 @@ export class Docker implements DockerClient {
     });
     const rows = (await (
       await this.request(`/containers/json?${filters}`)
-    ).json()) as { Id: string; Image: string; Labels: Labels }[];
+    ).json()) as {
+      Id: string;
+      Image: string;
+      Labels: Labels;
+      Mounts?: { Name?: string }[];
+    }[];
     return rows.map((row) => ({
       id: row.Id,
       image: row.Image,
+      volumes: (row.Mounts ?? []).flatMap((m) => (m.Name ? [m.Name] : [])),
       labels: row.Labels,
     }));
   }

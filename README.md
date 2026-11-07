@@ -202,11 +202,30 @@ volume and receive no persistent volume of their own.
 
 During cutover, old and new containers both mount the volume while the health
 check runs. Apps must tolerate this overlap and coordinate concurrent access;
-facedown uses a SQLite single-writer lease. With a configured volume, changing
-the production branch is refused while its release is live: reclassifying that
-container as a preview would expose production data. Remove the volume first
-(which requires stopping/removing containers that reference it), then change
-the branch and configure a volume again.
+facedown uses a SQLite single-writer lease.
+
+To rename production without losing data:
+
+```bash
+hoist apps:set facedown branch=trunk
+git branch -m main trunk
+git push hoist trunk
+```
+
+With a volume configured, `branch=trunk` records `pending_main_branch` in
+`apps:info`. The current production release keeps its bare-domain route and
+mount, including across serve restarts, until a healthy push of `trunk` cuts
+over and retires it. Failed pushes leave the old release serving. A live preview
+cannot be promoted because its container has no volume: first run
+`hoist previews:destroy facedown trunk`, then set `branch=trunk` and push again.
+
+Use a dedicated data directory such as `/data`. Docker seeds a newly created
+volume with files from the image's mount directory; reusing it then hides newer
+image files at that path. `/app`, `/usr`, and `/etc` are traps for stale code or
+system files. `apps:set volume=` does **not** migrate data written in an earlier
+container's filesystem. Back it up and restore it into the volume before the next
+release if needed. Mounts use current app config, so rolling back to an image
+built before volumes were configured still mounts the current volume.
 
 `hoist apps:volume:rm <app> --force` deletes the volume and clears its configured
 path, allowing a different path to be set. It refuses during an app build or
@@ -227,3 +246,23 @@ docker run --rm -v hoist-<app>-data:/data -v $PWD:/backup alpine tar czf /backup
 
 Quiesce writes first or use the app's database backup mechanism for a consistent
 backup of active databases. Volume backups are separate from `HOIST_DIR` backups.
+
+To restore after destroying and recreating an app, create the app but do not push
+or start a release yet. `apps:info --json` includes its numeric `id`; a recreated
+app may have a different ID. Confirm the named volume does not already exist
+with `docker volume inspect hoist-facedown-data` before proceeding. Set both
+ownership labels with the app name and new ID, then restore into that empty volume:
+
+```bash
+hoist apps:create facedown --volume /data
+hoist apps:info facedown --json
+restore_app=facedown
+restore_id=42 # replace 42 with the numeric id just printed by apps:info
+# Run from the directory containing facedown.tgz.
+docker volume create --label "hoist.app=$restore_app" --label "hoist.app-id=$restore_id" "hoist-$restore_app-data"
+docker run --rm -v "hoist-$restore_app-data:/data" -v "$PWD:/backup:ro" alpine:3.21 tar xzf "/backup/$restore_app.tgz" -C /data
+```
+
+Push only after extraction succeeds. Hoist will verify the new app's labels and
+mount the restored volume. Restore only trusted backups while no app container
+is using the volume; the Docker procedure deliberately stays outside hoist's CLI.

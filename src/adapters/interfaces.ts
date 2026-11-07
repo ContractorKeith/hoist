@@ -18,6 +18,7 @@ export interface ContainerSpec {
 }
 
 export interface Container {
+  volumes?: string[];
   id: string;
   image: string;
   labels: Labels;
@@ -28,7 +29,7 @@ export interface Volume {
   labels: Labels;
 }
 export interface DockerClient {
-  listVolumes(): Promise<Volume[]>;
+  listVolumes(labels?: string[]): Promise<Volume[]>;
   createVolume(name: string, labels: Labels): Promise<void>;
   removeVolume(name: string): Promise<void>;
   ping(): Promise<void>;

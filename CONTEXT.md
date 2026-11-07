@@ -17,7 +17,10 @@ _Avoid_: deployment, version, build
 **Volume**:
 An app-owned Docker named volume (`hoist-<app>-data`) mounted at its configured
 container path in production releases. Its data outlives releases; previews do
-not mount it. Rollback restores image and config, never volume contents.
+not mount it. The mount uses current app config, including when rolling back to
+an image built before the volume was configured. Rollback restores image and
+config, never volume contents. Setting a volume does not migrate an earlier
+container's files; Docker seeds a new volume from the image directory instead.
 _Avoid_: bind mount, disk snapshot
 
 **Config**:

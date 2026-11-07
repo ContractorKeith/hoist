@@ -58,21 +58,13 @@ CMD ["sh", "-c", "mkdir -p /data; echo start >> /data/starts; cp /data/starts /w
           "--force",
         ]);
         expect(refused.code).toBe(1);
-        expect(refused.output).toContain("409");
+        expect(refused.output).toContain(
+          `Stop containers using ${name}, then retry`,
+        );
         const info = JSON.parse(
           (await h.control("apps:info", h.appName, "--json")).stdout,
         );
         expect(info.volume_name).toBe(name);
-        const branchChange = await command([
-          ...h.ssh,
-          h.remote,
-          "hoist",
-          "apps:set",
-          h.appName,
-          "branch=preview",
-        ]);
-        expect(branchChange.code).toBe(1);
-        expect(branchChange.output).toContain("live production release");
         const pushed = await command(
           ["git", "push", "hoist", "HEAD:refs/heads/preview"],
           { cwd: h.source, env: h.pushEnv },
@@ -86,7 +78,34 @@ CMD ["sh", "-c", "mkdir -p /data; echo start >> /data/starts; cp /data/starts /w
             .stdout,
         )[0];
         expect(inspected.Mounts).toEqual([]);
+        const promotion = await command([
+          ...h.ssh,
+          h.remote,
+          "hoist",
+          "apps:set",
+          h.appName,
+          "branch=preview",
+        ]);
+        expect(promotion.code).toBe(1);
+        expect(promotion.output).toContain("destroy the preview first");
+        await h.control("apps:set", h.appName, "branch=trunk");
         await starts(5);
+        await h.stopServe();
+        await h.startServe();
+        await starts(5);
+        await ok(["git", "branch", "-m", "main", "trunk"], { cwd: h.source });
+        const renamed = await command(["git", "push", "hoist", "trunk"], {
+          cwd: h.source,
+          env: h.pushEnv,
+        });
+        expect(renamed.code, renamed.output).toBe(0);
+        await starts(6);
+        expect(h.store.app(h.appName)).toMatchObject({
+          main_branch: "trunk",
+          pending_main_branch: null,
+        });
+
+        await starts(6);
         const volume = required(
           (await h.docker.listVolumes()).find((v) => v.name === name),
         );

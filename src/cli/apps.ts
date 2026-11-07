@@ -9,7 +9,7 @@ import { appName, healthPath } from "../core/validation";
 import { appVolumeName, setVolume, volumePath } from "../core/volumes";
 import { createRepo } from "../git/repository";
 import { caddySettings } from "../server";
-import type { Store } from "../store/interface";
+import type { App, Store } from "../store/interface";
 import { type AppSetContext, setAppBranch } from "./app-branch";
 
 export function appsSet(
@@ -99,6 +99,9 @@ export function parseCli(args: string[]): {
   return result;
 }
 
+export function destroyConfirmation(app: App): string {
+  return `Destroy ${app.name}${app.volume_path ? ` and volume ${appVolumeName(app)} (all data)` : ""}? Type ${app.name} to confirm:`;
+}
 export async function appsCommand(
   root: string,
   store: Store,
@@ -155,7 +158,7 @@ export async function appsCommand(
   if (!command.force) {
     if (!process.stdin.isTTY)
       throw new Error("apps:destroy requires --force without a TTY");
-    if (prompt(`Destroy ${name}? Type ${name} to confirm:`) !== name)
+    if (prompt(destroyConfirmation(app)) !== name)
       throw new Error("Destroy cancelled");
   }
   const lease = await new SqliteAppLocks(store).acquire(`app:${name}`, {

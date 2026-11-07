@@ -41,6 +41,10 @@ export class FakeStore implements Store {
     const app = this.appRows.find((a) => a.id === appId);
     if (app) app.volume_path = path;
   }
+  setPendingMainBranch(appId: number, branch: string | null): void {
+    const app = this.appRows.find((a) => a.id === appId);
+    if (app) app.pending_main_branch = branch;
+  }
   setMainBranch(appId: number, branch: string): void {
     const app = this.appRows.find((a) => a.id === appId);
     if (app) app.main_branch = branch;

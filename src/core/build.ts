@@ -1,6 +1,6 @@
 import type { DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
-import { availableHost, previewHost } from "./previews";
+import { availableHost, previewHost, productionBranch } from "./previews";
 import { nextReleaseNumber } from "./releases";
 import { branchSlug } from "./validation";
 
@@ -26,7 +26,7 @@ export function reserveRelease(
       throw new Error(
         `Branch slug collides with existing branch ${collision.branch}`,
       );
-    if (branch !== (app.main_branch ?? "main")) {
+    if (!productionBranch(app, branch)) {
       availableHost(store, previewHost(app, branch), app.id);
       store.upsertPreview({
         app_id: app.id,

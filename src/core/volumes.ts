@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 import type { DockerClient } from "../adapters/interfaces";
 import type { App, Store } from "../store/interface";
+import { productionBranch } from "./previews";
 import { appName } from "./validation";
 
 export function volumePath(path: string): string {
@@ -51,8 +52,7 @@ export async function productionVolume(
   app: App,
   branch: string,
 ) {
-  if (!app.volume_path || branch !== (app.main_branch ?? "main"))
-    return undefined;
+  if (!app.volume_path || !productionBranch(app, branch)) return undefined;
   const path = volumePath(app.volume_path);
   if (!(await ownedVolume(docker, app)))
     await docker.createVolume(appVolumeName(app), volumeLabels(app));
@@ -70,6 +70,15 @@ export async function removeAppVolume(
   docker: DockerClient,
   app: App,
 ): Promise<void> {
-  if (await ownedVolume(docker, app))
-    await docker.removeVolume(appVolumeName(app));
+  if (!(await ownedVolume(docker, app))) return;
+  const name = appVolumeName(app);
+  try {
+    await docker.removeVolume(name);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes(": 409 "))
+      throw new Error(`Stop containers using ${name}, then retry`, {
+        cause: error,
+      });
+    throw error;
+  }
 }

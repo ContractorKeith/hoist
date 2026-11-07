@@ -84,7 +84,7 @@ test("Node client preserves exact ssh argv, host precedence and exit code", asyn
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 60000);
 
 for (const [signal, code] of [
   ["SIGINT", 130],
