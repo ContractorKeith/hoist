@@ -45,7 +45,7 @@ Bare `bun test` skips the e2e scenario; `bun run test:e2e` enables it with `HOIS
 
 - Persistent data uses `apps.volume_path` and the app-owned named volume `hoist-<app>-data`, labelled with app name and ID. Production cutover/recovery mounts it read-write; previews never mount it. Branch changes refuse to reclassify a live production release while its volume is configured.
 - Volumes survive releases, rollback, restart, retention and serve restarts. Old/new containers overlap during health checks; apps must coordinate writes. Rollback does not restore data.
-- `apps:volume:rm <app> --force` fails fast on the app lease and refuses in-use volumes; success clears the path. Path changes require removing the volume first. `apps:destroy` warns and deletes data, including `--force` without a TTY.
+- `apps:volume:rm <app> --force` fails fast on the app lease and refuses in-use volumes; success clears the path. Path changes require removing the volume first. `apps:destroy` refuses while the volume exists unless `--delete-volume` is passed; `--force` never deletes data.
 - Doctor flags missing configured volumes (next production use recreates them empty) and orphan named volumes. Back up volumes separately from HOIST_DIR.
 
 - Closing the terminal mid-push does not cancel the deploy; the release still lands server-side.

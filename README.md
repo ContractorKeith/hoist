@@ -148,7 +148,7 @@ Generated from the public server verb table. Internal entry points are omitted.
 hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] [--volume </path>]
 hoist apps:list [--json]
 hoist apps:info <name> [--json]
-hoist apps:destroy <name> [--force]
+hoist apps:destroy <name> [--force] [--delete-volume]
 hoist apps:set <name> retention=N|branch=<name>|volume=</path>
 hoist apps:volume:rm <name> --force
 hoist config:set <name> K=V [K=V...] | <name> KEY --stdin
@@ -211,8 +211,9 @@ the branch and configure a volume again.
 `hoist apps:volume:rm <app> --force` deletes the volume and clears its configured
 path, allowing a different path to be set. It refuses during an app build or
 while any container still references the volume. Stop/remove those containers
-before removal. `hoist apps:destroy <app>` warns with the volume name and deletes
-all its data. With `--force`, it also does this without a TTY.
+before removal. `hoist apps:destroy <app>` refuses while the app's volume exists;
+add `--delete-volume` to delete the volume and all its data along with the app.
+`--force` only skips the confirmation prompt and never deletes data by itself.
 
 `hoist doctor` lists configured app volumes and flags missing volumes and orphan
 `hoist-*-data` volumes. A missing configured volume will be recreated **empty** on

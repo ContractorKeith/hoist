@@ -3,7 +3,7 @@ import type { App, Store } from "../store/interface";
 import { removeImages } from "./build";
 import { availableHost, previewHost, releaseHost } from "./previews";
 import { appName, healthPath } from "./validation";
-import { appVolumeName, removeAppVolume, volumePath } from "./volumes";
+import { ownedVolume, volumePath } from "./volumes";
 
 export function knownApp(store: Store, name: string): App {
   const app = store.app(appName(name));
@@ -53,10 +53,17 @@ export async function destroyApp(
   cleanup: () => Promise<void>,
   caddy: CaddyAdmin,
   warn: (message: string) => void = console.error,
+  deleteVolume = false,
 ): Promise<void> {
   if (store.releases(app.id).some((release) => release.status === "building"))
     throw new Error(
       `a build is in progress for ${app.name}; wait for it to finish and retry`,
+    );
+  // Data is deleted only on an explicit flag; refuse before touching anything.
+  const volume = await ownedVolume(docker, app);
+  if (volume && !deleteVolume)
+    throw new Error(
+      `${app.name} has volume ${volume.name}; pass --delete-volume to delete it and all its data`,
     );
   for (const container of await docker.listContainers({
     "hoist.app": app.name,
@@ -64,9 +71,10 @@ export async function destroyApp(
     await docker.stopContainer(container.id);
     await docker.removeContainer(container.id);
   }
-  if (app.volume_path)
-    warn(`Destroying volume ${appVolumeName(app)} and all its data`);
-  await removeAppVolume(docker, app);
+  if (volume) {
+    warn(`Destroying volume ${volume.name} and all its data`);
+    await docker.removeVolume(volume.name);
+  }
   await removeImages(docker, { "hoist.app": app.name });
   const hosts = new Set([
     app.domain,

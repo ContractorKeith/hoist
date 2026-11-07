@@ -91,7 +91,23 @@ CMD ["sh", "-c", "mkdir -p /data; echo start >> /data/starts; cp /data/starts /w
           (await h.docker.listVolumes()).find((v) => v.name === name),
         );
         expect(volume.labels["hoist.app-id"]).toBe(String(app.id));
-        const destroyed = await h.control("apps:destroy", h.appName, "--force");
+        const kept = await command([
+          ...h.ssh,
+          h.remote,
+          "hoist",
+          "apps:destroy",
+          h.appName,
+          "--force",
+        ]);
+        expect(kept.code).toBe(1);
+        expect(kept.output).toContain("--delete-volume");
+        expect(h.store.app(h.appName)).not.toBeNull();
+        const destroyed = await h.control(
+          "apps:destroy",
+          h.appName,
+          "--force",
+          "--delete-volume",
+        );
         expect(destroyed.output).toContain(`Destroying volume ${name}`);
         expect(
           (await h.docker.listVolumes()).some((v) => v.name === name),

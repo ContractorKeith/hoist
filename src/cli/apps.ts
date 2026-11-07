@@ -38,7 +38,7 @@ export function appsSet(
 }
 
 const usage =
-  "Usage: hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] [--volume </path>] | apps:list [--json] | apps:info <name> [--json] | apps:destroy <name> [--force] | logs <app> [-f] [-n <lines>] [--release vN] [--branch <b>] | apps:set <app> retention=N|branch=<name>|volume=</path> | previews:list <app> [--json] | previews:destroy <app> <branch> | version";
+  "Usage: hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] [--volume </path>] | apps:list [--json] | apps:info <name> [--json] | apps:destroy <name> [--force] [--delete-volume] | logs <app> [-f] [-n <lines>] [--release vN] [--branch <b>] | apps:set <app> retention=N|branch=<name>|volume=</path> | previews:list <app> [--json] | previews:destroy <app> <branch> | version";
 
 export function parseCli(args: string[]): {
   verb: string;
@@ -48,6 +48,7 @@ export function parseCli(args: string[]): {
   volume?: string;
   json: boolean;
   force: boolean;
+  deleteVolume: boolean;
 } {
   const [verb, ...rest] = args;
   if (
@@ -69,6 +70,7 @@ export function parseCli(args: string[]): {
     volume: undefined as string | undefined,
     json: false,
     force: false,
+    deleteVolume: false,
   };
   if (verb !== "version" && verb !== "apps:list") {
     const name = rest.shift() ?? "";
@@ -83,6 +85,8 @@ export function parseCli(args: string[]): {
     if (flag === "--json" && ["apps:list", "apps:info"].includes(verb))
       result.json = true;
     else if (flag === "--force" && verb === "apps:destroy") result.force = true;
+    else if (flag === "--delete-volume" && verb === "apps:destroy")
+      result.deleteVolume = true;
     else if (flag === "--domain" && verb === "apps:create") {
       result.domain = (rest.shift() ?? "").toLowerCase();
       hostName(result.domain);
@@ -173,6 +177,8 @@ export async function appsCommand(
         });
       },
       new Caddy(caddySettings(root).adminPort),
+      console.error,
+      command.deleteVolume,
     );
   } finally {
     lease.release();

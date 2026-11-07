@@ -26,7 +26,7 @@ export const verbs = [
   "apps:create <name> [--domain <fqdn>] [--health-path </path>] [--volume </path>]",
   "apps:list [--json]",
   "apps:info <name> [--json]",
-  "apps:destroy <name> [--force]",
+  "apps:destroy <name> [--force] [--delete-volume]",
   "apps:set <name> retention=N|branch=<name>|volume=</path>",
   "apps:volume:rm <name> --force",
   "config:set <name> K=V [K=V...] | <name> KEY --stdin",
