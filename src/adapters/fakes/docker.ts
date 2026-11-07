@@ -11,6 +11,21 @@ export class FakeDocker implements DockerClient {
   readonly calls: { method: string; args: unknown[] }[] = [];
   readonly containers = new Map<string, Container>();
   readonly images = new Map<string, Labels>();
+  readonly volumes = new Map<string, Labels>();
+  async listVolumes(keys: string[] = []) {
+    this.record("listVolumes", keys);
+    return [...this.volumes]
+      .filter(([, labels]) => keys.every((key) => Object.hasOwn(labels, key)))
+      .map(([name, labels]) => ({ name, labels }));
+  }
+  async createVolume(name: string, labels: Labels): Promise<void> {
+    this.record("createVolume", name, labels);
+    if (!this.volumes.has(name)) this.volumes.set(name, labels);
+  }
+  async removeVolume(name: string): Promise<void> {
+    this.record("removeVolume", name);
+    this.volumes.delete(name);
+  }
   readonly running = new Set<string>();
   exposedPorts: number[] = [8080];
   async imagePorts(image: string): Promise<number[]> {
@@ -60,6 +75,7 @@ export class FakeDocker implements DockerClient {
     this.containers.set(id, {
       id,
       image: input.image,
+      volumes: input.volume ? [input.volume.name] : [],
       labels: structuredClone(input.labels),
     });
     return id;

@@ -10,7 +10,7 @@ import {
 import { buildLogDecoder, releaseLogSink } from "../core/build-logs";
 import { cutover, type HealthCheck } from "../core/cutover";
 import { removeReleaseLogs } from "../core/logs";
-import { releaseHost } from "../core/previews";
+import { productionBranch, releaseHost } from "../core/previews";
 import { prune } from "../core/retention";
 import { branchSlug } from "../core/validation";
 import { privatePath } from "../data";
@@ -53,8 +53,7 @@ async function receiveLocked(
     );
   if (
     refs.some(
-      (ref) =>
-        /^0+$/.test(ref.sha) && ref.branch === (app.main_branch ?? "main"),
+      (ref) => /^0+$/.test(ref.sha) && productionBranch(app, ref.branch),
     )
   )
     throw new Error("The main branch cannot be deleted.");

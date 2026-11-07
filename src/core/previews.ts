@@ -21,10 +21,22 @@ export function previewHost(app: App, branch: string): string {
   }
 }
 
+export function productionBranch(app: App, branch: string): boolean {
+  return (
+    branch === (app.main_branch ?? "main") || branch === app.pending_main_branch
+  );
+}
+export function branchSettings(app: App, branch: string): App {
+  return app.volume_path
+    ? {
+        ...app,
+        pending_main_branch:
+          branch === (app.main_branch ?? "main") ? null : branch,
+      }
+    : { ...app, main_branch: branch, pending_main_branch: null };
+}
 export function releaseHost(app: App, branch: string): string {
-  return branch === (app.main_branch ?? "main")
-    ? app.domain
-    : previewHost(app, branch);
+  return productionBranch(app, branch) ? app.domain : previewHost(app, branch);
 }
 
 export function ownsPreview(store: Store, app: App, branch: string): boolean {
@@ -35,7 +47,7 @@ export function ownsPreview(store: Store, app: App, branch: string): boolean {
 }
 
 export function requirePreview(store: Store, app: App, branch: string): void {
-  if (branch === (app.main_branch ?? "main"))
+  if (productionBranch(app, branch))
     throw new Error("The main branch cannot be destroyed as a preview.");
   if (!ownsPreview(store, app, branch))
     throw new Error(`no preview ${branch} for ${app.name}`);
@@ -123,6 +135,16 @@ export function reclassification(
   branch: string,
 ): string[] {
   branchSlug(branch);
+  if (
+    app.volume_path &&
+    branch !== (app.main_branch ?? "main") &&
+    store
+      .releases(app.id)
+      .some((r) => r.branch === branch && r.status === "live")
+  )
+    throw new Error(
+      "Cannot promote a live preview with a volume configured; destroy the preview first: its container has no volume",
+    );
   const branches = [
     ...new Set([
       branch,
@@ -131,7 +153,7 @@ export function reclassification(
     ]),
   ];
   const slugs = new Map<string, string>();
-  const updated = { ...app, main_branch: branch };
+  const updated = branchSettings(app, branch);
   for (const name of branches) {
     const slug = branchSlug(name);
     const existing = slugs.get(slug);
@@ -140,7 +162,7 @@ export function reclassification(
     slugs.set(slug, name);
     availableHost(store, releaseHost(updated, name), app.id);
   }
-  return branches.filter((name) => name !== branch);
+  return branches.filter((name) => !productionBranch(updated, name));
 }
 
 export function setMainBranch(
@@ -160,6 +182,14 @@ export function setMainBranch(
           last_push_at: now,
         });
     store.removePreview(app.id, branch);
-    store.setMainBranch(app.id, branch);
+    if (app.volume_path)
+      store.setPendingMainBranch(
+        app.id,
+        branchSettings(app, branch).pending_main_branch ?? null,
+      );
+    else {
+      store.setMainBranch(app.id, branch);
+      store.setPendingMainBranch(app.id, null);
+    }
   });
 }

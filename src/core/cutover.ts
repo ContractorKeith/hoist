@@ -1,8 +1,10 @@
 import type { CaddyAdmin, DockerClient, Labels } from "../adapters/interfaces";
 import type { App, Release, Store } from "../store/interface";
 import { assertAppHost } from "./caddy-config";
+import { releaseHost } from "./previews";
 import { decryptConfig, validateConfigKey } from "./secrets";
 import { healthPath } from "./validation";
+import { productionVolume } from "./volumes";
 
 export type HealthCheck = (port: number, path: string) => Promise<void>;
 type Log = (message: string) => Promise<void>;
@@ -50,6 +52,7 @@ async function startHealthy(
     await log("Starting new container");
     id = await docker.createContainer({
       image: release.image,
+      volume: await productionVolume(docker, app, release.branch),
       config,
       port,
       publishPort: "",
@@ -132,13 +135,18 @@ export async function cutover(
     .filter(
       (row) =>
         row.status === "live" &&
-        row.branch === release.branch &&
+        releaseHost(app, row.branch) === host &&
         row.id !== release.id,
     )
     .map((row) => ({ ...row }));
   store.transaction(() => {
     for (const row of old) store.setReleaseState(row.id, "stopped");
     store.setReleaseState(release.id, "live", id);
+    if (release.branch === app.pending_main_branch) {
+      store.setMainBranch(app.id, release.branch);
+      store.setPendingMainBranch(app.id, null);
+      store.removePreview(app.id, release.branch);
+    }
   });
   for (const row of old) {
     await log("Stopping previous container");

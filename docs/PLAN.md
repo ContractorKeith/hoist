@@ -83,6 +83,7 @@ Ubuntu LTS server and in GitHub Actions.
 | 26 | Multiple users, API tokens, HTTPS API | Later | | ADR-0001 |
 | 27 | Multi-node, agents, gRPC | Drop | | Levelrail's job |
 | 28 | Template marketplace, MCP server | Drop | | |
+| 29 | Persistent app volumes | v0.2 | #40 | One named volume per app; production only; explicit removal and doctor diagnostics |
 
 ## 5. Architecture
 
