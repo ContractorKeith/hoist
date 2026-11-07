@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { volumeName, volumePath } from "../core/volumes";
 import type {
   BuildImage,
   Container,
@@ -44,6 +45,30 @@ export class Docker implements DockerClient {
     return response;
   }
 
+  async listVolumes() {
+    const row = (await (await this.request("/volumes")).json()) as {
+      Volumes: { Name: string; Labels?: Labels | null }[] | null;
+    };
+    return (row.Volumes ?? []).map((v) => ({
+      name: v.Name,
+      labels: v.Labels ?? {},
+    }));
+  }
+  async createVolume(name: string, labels: Labels): Promise<void> {
+    volumeName(name);
+    validate.labels(labels);
+    await this.request("/volumes/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ Name: name, Labels: labels }),
+    });
+  }
+  async removeVolume(name: string): Promise<void> {
+    volumeName(name);
+    await this.request(`/volumes/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  }
   async ping(): Promise<void> {
     await this.request("/_ping");
   }
@@ -232,6 +257,10 @@ export class Docker implements DockerClient {
     ) {
       throw new Error("Invalid container config");
     }
+    if (input.volume) {
+      volumeName(input.volume.name);
+      volumePath(input.volume.path);
+    }
     const response = await this.request("/containers/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -243,6 +272,16 @@ export class Docker implements DockerClient {
         Tty: true,
         ExposedPorts: { [`${input.port}/tcp`]: {} },
         HostConfig: {
+          Mounts: input.volume
+            ? [
+                {
+                  Type: "volume",
+                  Source: input.volume.name,
+                  Target: input.volume.path,
+                  ReadOnly: false,
+                },
+              ]
+            : [],
           PortBindings: {
             [`${input.port}/tcp`]: [
               { HostIp: "127.0.0.1", HostPort: String(input.publishPort) },

@@ -87,6 +87,7 @@ export const migrations = [
   `ALTER TABLE sessions ADD COLUMN password_version TEXT NOT NULL DEFAULT '';
   DELETE FROM sessions;
   INSERT INTO settings(key, value) VALUES ('password_version', lower(hex(randomblob(16)))) ON CONFLICT(key) DO NOTHING;`,
+  `ALTER TABLE apps ADD COLUMN volume_path TEXT;`,
 ] as const;
 
 export const schemaVersion = migrations.length;

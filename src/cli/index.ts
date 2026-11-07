@@ -19,14 +19,16 @@ import { doctor } from "./doctor";
 import { logsCommand } from "./logs";
 import { previewsCommand } from "./previews";
 import { releasesCommand } from "./releases";
+import { volumeRemoveCommand } from "./volumes";
 
 // Public CLI contract, shared with generated client help and README.
 export const verbs = [
-  "apps:create <name> [--domain <fqdn>] [--health-path </path>]",
+  "apps:create <name> [--domain <fqdn>] [--health-path </path>] [--volume </path>]",
   "apps:list [--json]",
   "apps:info <name> [--json]",
   "apps:destroy <name> [--force]",
-  "apps:set <name> retention=N|branch=<name>",
+  "apps:set <name> retention=N|branch=<name>|volume=</path>",
+  "apps:volume:rm <name> --force",
   "config:set <name> K=V [K=V...] | <name> KEY --stdin",
   "config:unset <name> K",
   "config:list <name> [--reveal] [--json]",
@@ -74,6 +76,7 @@ const commands: Record<
   "apps:list": appsCommand,
   "apps:info": appsCommand,
   "apps:destroy": appsCommand,
+  "apps:volume:rm": volumeRemoveCommand,
   "apps:set": (_root, store, args) => appsSet(store, args),
   "previews:list": previewsCommand,
   "previews:destroy": previewsCommand,

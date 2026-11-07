@@ -145,11 +145,12 @@ Generated from the public server verb table. Internal entry points are omitted.
 
 <!-- BEGIN VERBS -->
 ```text
-hoist apps:create <name> [--domain <fqdn>] [--health-path </path>]
+hoist apps:create <name> [--domain <fqdn>] [--health-path </path>] [--volume </path>]
 hoist apps:list [--json]
 hoist apps:info <name> [--json]
 hoist apps:destroy <name> [--force]
-hoist apps:set <name> retention=N|branch=<name>
+hoist apps:set <name> retention=N|branch=<name>|volume=</path>
+hoist apps:volume:rm <name> --force
 hoist config:set <name> K=V [K=V...] | <name> KEY --stdin
 hoist config:unset <name> K
 hoist config:list <name> [--reveal] [--json]
@@ -184,3 +185,44 @@ Builds use Bun’s portable Linux runtime (x64 baseline or arm64), so they do no
 inherit distribution-specific ICU libraries. A real public VM's ACME, reboot and
 idle-server timing checks remain manual acceptance before tagging. Release CI cross-compiles both architectures on PRs;
 `v*` tags publish binaries, checksums, installer and changelog notes.
+
+## Persistent data
+
+Create an app with `hoist apps:create facedown --volume /data`, or add storage to
+an existing app with `hoist apps:set facedown volume=/data`. The setting takes
+effect at the next production release. `apps:info` shows the volume name and path.
+The path must be absolute and normalized, at most 255 characters, and cannot be
+`/` or beneath `/proc`, `/sys` or `/dev`.
+
+Hoist creates one Docker named volume, `hoist-<app>-data`, on first production use
+and mounts it read-write. Data survives pushes, rollback, restart, retention
+pruning, and `hoist serve` restarts. Rollback restores image and config; it does
+not roll back volume contents. Preview releases never mount the production
+volume and receive no persistent volume of their own.
+
+During cutover, old and new containers both mount the volume while the health
+check runs. Apps must tolerate this overlap and coordinate concurrent access;
+facedown uses a SQLite single-writer lease. With a configured volume, changing
+the production branch is refused while its release is live: reclassifying that
+container as a preview would expose production data. Remove the volume first
+(which requires stopping/removing containers that reference it), then change
+the branch and configure a volume again.
+
+`hoist apps:volume:rm <app> --force` deletes the volume and clears its configured
+path, allowing a different path to be set. It refuses during an app build or
+while any container still references the volume. Stop/remove those containers
+before removal. `hoist apps:destroy <app>` warns with the volume name and deletes
+all its data. With `--force`, it also does this without a TTY.
+
+`hoist doctor` lists configured app volumes and flags missing volumes and orphan
+`hoist-*-data` volumes. A missing configured volume will be recreated **empty** on
+the next production release; restore its backup before deploying.
+
+Back up a volume (replace `<app>` with the app name):
+
+```bash
+docker run --rm -v hoist-<app>-data:/data -v $PWD:/backup alpine tar czf /backup/<app>.tgz -C /data .
+```
+
+Quiesce writes first or use the app's database backup mechanism for a consistent
+backup of active databases. Volume backups are separate from `HOIST_DIR` backups.

@@ -13,6 +13,8 @@ import { caddySettings } from "../server";
 import { DashboardStore } from "../store/dashboard";
 import { databaseError, type SqliteStore } from "../store/sqlite";
 
+import { checkVolumes } from "./doctor-volumes";
+
 export class ServiceUnavailable extends Error {}
 export type Check = () => unknown | Promise<unknown>;
 const caddyFix = "Re-run install.sh to restore pinned Caddy.";
@@ -133,6 +135,7 @@ export function doctorChecks(
       requireCheck(isAbsolute(root), "Set HOIST_DIR to an absolute path.");
       return (await repairRepoHooks(root)).join("; ");
     },
+    "App volumes": () => checkVolumes(store(), client()),
     "Orphan containers": async () => {
       const known = new Set(
         store()

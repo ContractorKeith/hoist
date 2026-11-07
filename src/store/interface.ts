@@ -15,6 +15,7 @@ export interface App {
   health_path: string;
   retention?: number;
   main_branch?: string | null;
+  volume_path?: string | null;
 }
 export interface Release {
   id: number;
@@ -38,6 +39,7 @@ export interface Preview {
 export interface Store {
   stopBranchReleases(appId: number, branch: string): void;
   removePreview(appId: number, branch: string): void;
+  setVolumePath(appId: number, path: string | null): void;
   setMainBranch(appId: number, branch: string): void;
   previews(appId: number): Preview[];
   upsertPreview(input: Preview): void;

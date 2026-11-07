@@ -3,6 +3,7 @@ import type { App, Release, Store } from "../store/interface";
 import { assertAppHost } from "./caddy-config";
 import { decryptConfig, validateConfigKey } from "./secrets";
 import { healthPath } from "./validation";
+import { productionVolume } from "./volumes";
 
 export type HealthCheck = (port: number, path: string) => Promise<void>;
 type Log = (message: string) => Promise<void>;
@@ -50,6 +51,7 @@ async function startHealthy(
     await log("Starting new container");
     id = await docker.createContainer({
       image: release.image,
+      volume: await productionVolume(docker, app, release.branch),
       config,
       port,
       publishPort: "",

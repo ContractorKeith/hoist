@@ -131,6 +131,9 @@ export class SqliteStore extends LockStore implements Store {
       [id],
     );
   }
+  setVolumePath(appId: number, path: string | null): void {
+    this.db.run("UPDATE apps SET volume_path = ? WHERE id = ?", [path, appId]);
+  }
   setMainBranch(appId: number, branch: string): void {
     this.db.run("UPDATE apps SET main_branch = ? WHERE id = ?", [
       branch,

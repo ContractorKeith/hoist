@@ -14,6 +14,12 @@ An immutable record of one image, one config snapshot and one git SHA, numbered 
 branch (`v1`, `v2`, ...). A release is `building` while its image builds, `built` when ready for cutover, then `live`, `stopped` or `failed`. A rollback creates a new release; it never moves a pointer back.
 _Avoid_: deployment, version, build
 
+**Volume**:
+An app-owned Docker named volume (`hoist-<app>-data`) mounted at its configured
+container path in production releases. Its data outlives releases; previews do
+not mount it. Rollback restores image and config, never volume contents.
+_Avoid_: bind mount, disk snapshot
+
 **Config**:
 The app's current environment variables. Snapshotted into every release so a rollback runs
 with the config that was live then.

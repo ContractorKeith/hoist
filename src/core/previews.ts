@@ -123,6 +123,18 @@ export function reclassification(
   branch: string,
 ): string[] {
   branchSlug(branch);
+  if (
+    app.volume_path &&
+    branch !== (app.main_branch ?? "main") &&
+    store
+      .releases(app.id)
+      .some(
+        (r) => r.branch === (app.main_branch ?? "main") && r.status === "live",
+      )
+  )
+    throw new Error(
+      "Cannot turn a live production release into a preview while a volume is configured; remove the volume first before changing the main branch",
+    );
   const branches = [
     ...new Set([
       branch,

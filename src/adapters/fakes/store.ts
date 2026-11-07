@@ -37,6 +37,10 @@ export class FakeStore implements Store {
     if (row) row.pruned_at = new Date().toISOString();
   }
   readonly previewRows: Preview[] = [];
+  setVolumePath(appId: number, path: string | null): void {
+    const app = this.appRows.find((a) => a.id === appId);
+    if (app) app.volume_path = path;
+  }
   setMainBranch(appId: number, branch: string): void {
     const app = this.appRows.find((a) => a.id === appId);
     if (app) app.main_branch = branch;

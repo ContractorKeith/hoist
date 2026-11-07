@@ -11,6 +11,19 @@ export class FakeDocker implements DockerClient {
   readonly calls: { method: string; args: unknown[] }[] = [];
   readonly containers = new Map<string, Container>();
   readonly images = new Map<string, Labels>();
+  readonly volumes = new Map<string, Labels>();
+  async listVolumes() {
+    this.record("listVolumes");
+    return [...this.volumes].map(([name, labels]) => ({ name, labels }));
+  }
+  async createVolume(name: string, labels: Labels): Promise<void> {
+    this.record("createVolume", name, labels);
+    if (!this.volumes.has(name)) this.volumes.set(name, labels);
+  }
+  async removeVolume(name: string): Promise<void> {
+    this.record("removeVolume", name);
+    this.volumes.delete(name);
+  }
   readonly running = new Set<string>();
   exposedPorts: number[] = [8080];
   async imagePorts(image: string): Promise<number[]> {

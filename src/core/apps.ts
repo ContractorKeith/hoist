@@ -3,6 +3,7 @@ import type { App, Store } from "../store/interface";
 import { removeImages } from "./build";
 import { availableHost, previewHost, releaseHost } from "./previews";
 import { appName, healthPath } from "./validation";
+import { appVolumeName, removeAppVolume, volumePath } from "./volumes";
 
 export function knownApp(store: Store, name: string): App {
   const app = store.app(appName(name));
@@ -18,9 +19,11 @@ export async function createApp(
   health: string,
   provision: () => Promise<void>,
   cleanup: () => Promise<void>,
+  volume?: string,
 ): Promise<App> {
   appName(name);
   healthPath(health);
+  if (volume !== undefined) volumePath(volume);
   if (store.app(name)) throw new Error("App already exists");
   availableHost(store, domain);
   try {
@@ -33,7 +36,9 @@ export async function createApp(
   try {
     return store.transaction(() => {
       availableHost(store, domain);
-      return store.createApp(name, domain, health);
+      const app = store.createApp(name, domain, health);
+      if (volume !== undefined) store.setVolumePath(app.id, volume);
+      return store.app(name) ?? app;
     });
   } catch (error) {
     await cleanup();
@@ -59,6 +64,9 @@ export async function destroyApp(
     await docker.stopContainer(container.id);
     await docker.removeContainer(container.id);
   }
+  if (app.volume_path)
+    warn(`Destroying volume ${appVolumeName(app)} and all its data`);
+  await removeAppVolume(docker, app);
   await removeImages(docker, { "hoist.app": app.name });
   const hosts = new Set([
     app.domain,

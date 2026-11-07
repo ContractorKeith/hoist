@@ -18,6 +18,7 @@ export async function runChecks(
   const needsStore = new Set([
     "Secret key",
     "Serve lease",
+    "App volumes",
     "Orphan containers",
     "Orphan images",
     "Orphan routes",

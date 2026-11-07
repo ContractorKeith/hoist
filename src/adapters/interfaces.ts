@@ -14,6 +14,7 @@ export interface ContainerSpec {
   // A loopback-only published port; empty asks Docker to allocate it atomically.
   publishPort: number | "";
   config?: Record<string, string>;
+  volume?: { name: string; path: string };
 }
 
 export interface Container {
@@ -22,7 +23,14 @@ export interface Container {
   labels: Labels;
 }
 
+export interface Volume {
+  name: string;
+  labels: Labels;
+}
 export interface DockerClient {
+  listVolumes(): Promise<Volume[]>;
+  createVolume(name: string, labels: Labels): Promise<void>;
+  removeVolume(name: string): Promise<void>;
   ping(): Promise<void>;
   imagePorts(image: string): Promise<number[]>;
   inspectContainer(
